@@ -21,7 +21,7 @@ def generate_launch_description():
         output='screen',
         parameters=[config_path],
         remappings=[
-            ('odom', '/imu_propagate'),
+            ('odom', '/vins_estimator/imu_propagate'),
             ('cmd', '/position_cmd')
         ]
     )

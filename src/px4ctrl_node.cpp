@@ -88,16 +88,16 @@ int main(int argc, char **argv)
         // 1. 订阅飞控状态信息
         FLIGHT_LOG_INFO(SENSOR, "创建飞控状态订阅器: /fmu/out/vehicle_status_v1");
         auto state_sub = node->create_subscription<px4_msgs::msg::VehicleStatus>(
-            "/fmu/out/vehicle_status_v1", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/fmu/out/vehicle_status_v1", rclcpp::QoS(10).best_effort().durability_volatile(),
             std::bind(&Test::stateCallback, &test, std::placeholders::_1));
-        FLIGHT_LOG_DEBUG(SENSOR, "飞控状态订阅器创建完成，QoS: reliable");
+        FLIGHT_LOG_DEBUG(SENSOR, "飞控状态订阅器创建完成，QoS: best_effort");
 
         // 2. 订阅扩展状态信息
         FLIGHT_LOG_INFO(SENSOR, "创建扩展状态订阅器: /fmu/out/vehicle_land_detected");
         auto extended_state_sub = node->create_subscription<px4_msgs::msg::VehicleLandDetected>(
-            "/fmu/out/vehicle_land_detected", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/fmu/out/vehicle_land_detected", rclcpp::QoS(10).best_effort().durability_volatile(),
             std::bind(&Test::extendedStateCallback, &test, std::placeholders::_1));
-        FLIGHT_LOG_DEBUG(SENSOR, "扩展状态订阅器创建完成，QoS: reliable");
+        FLIGHT_LOG_DEBUG(SENSOR, "扩展状态订阅器创建完成，QoS: best_effort");
 
         // 3. 订阅里程计信息
         FLIGHT_LOG_INFO(SENSOR, "创建里程计订阅器: odom");
@@ -126,9 +126,9 @@ int main(int argc, char **argv)
         {
             FLIGHT_LOG_INFO(SENSOR, "创建遥控器订阅器: /fmu/out/manual_control_setpoint");
             rc_sub = node->create_subscription<px4_msgs::msg::ManualControlSetpoint>(
-                "/fmu/out/manual_control_setpoint", rclcpp::QoS(10).reliable().durability_volatile(),
+                "/fmu/out/manual_control_setpoint", rclcpp::QoS(10).best_effort().durability_volatile(),
                 std::bind(&Test::rcCallback, &test, std::placeholders::_1));
-            FLIGHT_LOG_DEBUG(SENSOR, "遥控器订阅器创建完成，QoS: reliable");
+            FLIGHT_LOG_DEBUG(SENSOR, "遥控器订阅器创建完成，QoS: best_effort");
         } else {
             FLIGHT_LOG_WARN(SENSOR, "遥控器已禁用 (no_RC=true)");
         }
@@ -152,14 +152,14 @@ int main(int argc, char **argv)
         // 1. 订阅飞控状态信息（仅接受状态）
         FLIGHT_LOG_INFO(SENSOR, "创建飞控状态订阅器: /fmu/out/vehicle_status_v1");
         auto state_sub = node->create_subscription<px4_msgs::msg::VehicleStatus>(
-            "/fmu/out/vehicle_status_v1", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/fmu/out/vehicle_status_v1", rclcpp::QoS(10).best_effort().durability_volatile(),
             std::bind(&State_Data_t::feed, &fsm.state_data, std::placeholders::_1));
-        FLIGHT_LOG_DEBUG(SENSOR, "飞控状态订阅器创建完成，QoS: reliable");
+        FLIGHT_LOG_DEBUG(SENSOR, "飞控状态订阅器创建完成，QoS: best_effort");
 
         // 2. 订阅扩展状态信息（仅接受状态）
         // 修改主题：/mavros/extended_state -> /fmu/out/vehicle_land_detected
         auto extended_state_sub = node->create_subscription<px4_msgs::msg::VehicleLandDetected>(
-            "/fmu/out/vehicle_land_detected", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/fmu/out/vehicle_land_detected", rclcpp::QoS(10).best_effort().durability_volatile(),
             std::bind(&ExtendedState_Data_t::feed, &fsm.extended_state_data, std::placeholders::_1));
 
         // 3. 订阅里程计信息（接受里程计数据后提取并检查频率）
@@ -184,7 +184,7 @@ int main(int argc, char **argv)
         {
             // 修改主题：/mavros/rc/in -> /fmu/out/manual_control_setpoint
             rc_sub = node->create_subscription<px4_msgs::msg::ManualControlSetpoint>(
-                "/fmu/out/manual_control_setpoint", rclcpp::QoS(10).reliable().durability_volatile(),
+                "/fmu/out/manual_control_setpoint", rclcpp::QoS(10).best_effort().durability_volatile(),
                 std::bind(&RC_Data_t::feed, &fsm.rc_data, std::placeholders::_1));
         }
 
@@ -255,8 +255,11 @@ int main(int argc, char **argv)
     {
         rclcpp::spin_some(node);
         rclcpp::sleep_for(std::chrono::seconds(1));
-        if (trials++ > 5)//等待时间不能超过5s
-            RCLCPP_ERROR(node->get_logger(), "Unable to connect to PX4!!!");
+        if (trials++ > 5) // 等待时间不能超过5s
+        {
+            RCLCPP_WARN(node->get_logger(), "USB connection not detected, but continuing with PX4 communication...");
+            break; // 添加break语句，避免无限循环
+        }
     }
 
 
