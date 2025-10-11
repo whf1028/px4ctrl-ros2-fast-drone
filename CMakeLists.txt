@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(px4ctrl)
+project(px4ctrl_ros2_fast_drone)
 
 # 设置C++标准
 if(NOT CMAKE_CXX_STANDARD)
@@ -18,24 +18,25 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-find_package(mavros_msgs REQUIRED)
+find_package(px4_msgs REQUIRED)
 find_package(quadrotor_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 # 包含目录
 include_directories(
   include
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  src
   ${EIGEN3_INCLUDE_DIRS}
 )
 
 # 添加可执行文件
-add_executable(px4ctrl_node 
+add_executable(px4ctrl_node
   src/px4ctrl_node.cpp
   src/PX4CtrlParam.cpp
   src/test.cpp
   src/controller.cpp
   src/input.cpp
   src/PX4CtrlFSM.cpp
+  src/FlightLogger.cpp
 )
 
 # 链接依赖库
@@ -45,7 +46,7 @@ ament_target_dependencies(px4ctrl_node
   geometry_msgs
   nav_msgs
   sensor_msgs
-  mavros_msgs
+  px4_msgs
   quadrotor_msgs
   Eigen3
 )

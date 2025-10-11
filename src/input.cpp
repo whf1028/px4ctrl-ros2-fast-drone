@@ -27,19 +27,21 @@ RC_Data_t::RC_Data_t(const rclcpp::Node::SharedPtr& node)
     }
 }
 
-void RC_Data_t::feed(const mavros_msgs::msg::RCIn::SharedPtr pMsg)
+void RC_Data_t::feed(const px4_msgs::msg::ManualControlSetpoint::SharedPtr pMsg)
 {
     msg = *pMsg;
     rcv_stamp = node_->now();
 
-    // 归一化四个控制通道(1-4)的输入值到[-1,1]范围
+    // 使用ManualControlSetpoint的字段映射到RC通道
     // 通道1-4分别对应:横滚、俯仰、油门、偏航
+    ch[0] = msg.roll;   // 横滚
+    ch[1] = msg.pitch;  // 俯仰
+    ch[2] = msg.throttle; // 油门
+    ch[3] = msg.yaw;    // 偏航
+    
+    // 设置死区,消除微小的摇杆抖动
     for (int i = 0; i < 4; i++)
     {
-        // 将1000-2000的PWM值映射到[-1,1]
-        ch[i] = ((double)msg.channels[i] - 1500.0) / 500.0;
-        
-        // 设置死区,消除微小的摇杆抖动
         if (ch[i] > DEAD_ZONE)
             ch[i] = (ch[i] - DEAD_ZONE) / (1 - DEAD_ZONE);
         else if (ch[i] < -DEAD_ZONE)
@@ -48,10 +50,10 @@ void RC_Data_t::feed(const mavros_msgs::msg::RCIn::SharedPtr pMsg)
             ch[i] = 0.0;
     }
 
-    // 处理特殊通道
-    mode = ((double)msg.channels[4] - 1000.0) / 1000.0;      // 通道5:飞行模式选择
-    gear = ((double)msg.channels[5] - 1000.0) / 1000.0;      // 通道6:档位切换
-    reboot_cmd = ((double)msg.channels[7] - 1000.0) / 1000.0;// 通道8:重启命令
+    // 处理特殊通道 - 使用aux字段
+    mode = msg.aux1;      // aux1:飞行模式选择
+    gear = msg.aux2;       // aux2:档位切换
+    reboot_cmd = msg.aux4; // aux4:重启命令
 
     check_validity();//检查数据有效性
 
@@ -231,7 +233,7 @@ State_Data_t::State_Data_t(const rclcpp::Node::SharedPtr& node)
 {
 }
 
-void State_Data_t::feed(const mavros_msgs::msg::State::SharedPtr pMsg)
+void State_Data_t::feed(const px4_msgs::msg::VehicleStatus::SharedPtr pMsg)
 {
     current_state = *pMsg;
 }
@@ -242,7 +244,7 @@ ExtendedState_Data_t::ExtendedState_Data_t(const rclcpp::Node::SharedPtr& node)
 {
 }
 
-void ExtendedState_Data_t::feed(const mavros_msgs::msg::ExtendedState::SharedPtr pMsg)
+void ExtendedState_Data_t::feed(const px4_msgs::msg::VehicleLandDetected::SharedPtr pMsg)
 {
     current_extended_state = *pMsg;
 }
@@ -259,21 +261,22 @@ void Command_Data_t::feed(const quadrotor_msgs::msg::PositionCommand::SharedPtr 
     msg = *pMsg;
     rcv_stamp = node_->now();
 
-    p(0) = msg.pos.x;
-    p(1) = msg.pos.y;
-    p(2) = msg.pos.z;
+    p(0) = msg.position.x;
+    p(1) = msg.position.y;
+    p(2) = msg.position.z;
 
-    v(0) = msg.vel.x;
-    v(1) = msg.vel.y;
-    v(2) = msg.vel.z;
+    v(0) = msg.velocity.x;
+    v(1) = msg.velocity.y;
+    v(2) = msg.velocity.z;
 
-    a(0) = msg.acc.x;
-    a(1) = msg.acc.y;
-    a(2) = msg.acc.z;
+    a(0) = msg.acceleration.x;
+    a(1) = msg.acceleration.y;
+    a(2) = msg.acceleration.z;
 
-    j(0) = msg.jerk.x;
-    j(1) = msg.jerk.y;
-    j(2) = msg.jerk.z;
+    // PositionCommand消息中没有jerk字段，设置为0
+    j(0) = 0.0;
+    j(1) = 0.0;
+    j(2) = 0.0;
 
     // std::cout << "j1=" << j.transpose() << std::endl;
 

@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>px4ctrl</name>
+  <name>px4ctrl_ros2_fast_drone</name>
   <version>0.0.1</version>
   <description>PX4 controller package for ROS2</description>
   <maintainer email="your_email@example.com">Your Name</maintainer>
@@ -14,7 +14,7 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
-  <depend>mavros_msgs</depend>
+  <depend>px4_msgs</depend>
   <depend>quadrotor_msgs</depend>
 
   <test_depend>ament_lint_auto</test_depend>

@@ -6,12 +6,12 @@ Test::Test(const std::shared_ptr<rclcpp::Node>& node)
 
 // 回调函数只保存数据
 // 接收并保存飞控状态信息
-void Test::stateCallback(const mavros_msgs::msg::State::SharedPtr msg) {
+void Test::stateCallback(const px4_msgs::msg::VehicleStatus::SharedPtr msg) {
     state_msg_ = msg;
 }
 
 // 接收并保存扩展状态信息
-void Test::extendedStateCallback(const mavros_msgs::msg::ExtendedState::SharedPtr msg) {
+void Test::extendedStateCallback(const px4_msgs::msg::VehicleLandDetected::SharedPtr msg) {
     extended_state_msg_ = msg;
 }
 
@@ -31,7 +31,7 @@ void Test::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg) {
 }
 
 // 接收并保存遥控器数据
-void Test::rcCallback(const mavros_msgs::msg::RCIn::SharedPtr msg) {
+void Test::rcCallback(const px4_msgs::msg::ManualControlSetpoint::SharedPtr msg) {
     rc_msg_ = msg;
 }
 
@@ -65,15 +65,15 @@ void Test::displayMessages() {
         
         // 状态信息
         if(state_msg_) {
-            RCLCPP_INFO(node_->get_logger(), "State - Connected: %d, Armed: %d, Mode: %s", 
-                        state_msg_->connected, state_msg_->armed, state_msg_->mode.c_str());
+            RCLCPP_INFO(node_->get_logger(), "State - USB Connected: %d, Armed: %d, Nav State: %d", 
+                        state_msg_->usb_connected, state_msg_->arming_state, state_msg_->nav_state);
         } else {
             RCLCPP_INFO(node_->get_logger(), "No State message received");
         }
 
         if(extended_state_msg_) {
-            RCLCPP_INFO(node_->get_logger(), "Extended State - Landed State: %d", 
-                        extended_state_msg_->landed_state);
+            RCLCPP_INFO(node_->get_logger(), "Extended State - Landed: %d", 
+                        extended_state_msg_->landed);
         } else {
             RCLCPP_INFO(node_->get_logger(), "No Extended State message received");
         }
@@ -101,18 +101,18 @@ void Test::displayMessages() {
         // 位置指令信息
         if(cmd_msg_) {
             RCLCPP_INFO(node_->get_logger(), "Position Command - Position: [%f, %f, %f]", 
-                        cmd_msg_->pos.x, cmd_msg_->pos.y, cmd_msg_->pos.z);
+                        cmd_msg_->position.x, cmd_msg_->position.y, cmd_msg_->position.z);
         } else {
             RCLCPP_INFO(node_->get_logger(), "No Position Command message received");
         }
 
         // 遥控器信息
         if(rc_msg_) {
-            RCLCPP_INFO(node_->get_logger(), "RC Input - CH[1-8]: %d, %d, %d, %d, %d, %d, %d, %d",
-                rc_msg_->channels[0], rc_msg_->channels[1], rc_msg_->channels[2], rc_msg_->channels[3],
-                rc_msg_->channels[4], rc_msg_->channels[5], rc_msg_->channels[6], rc_msg_->channels[7]);
+            RCLCPP_INFO(node_->get_logger(), "Manual Control - Roll: %f, Pitch: %f, Throttle: %f, Yaw: %f, Aux1-4: %f, %f, %f, %f",
+                rc_msg_->roll, rc_msg_->pitch, rc_msg_->throttle, rc_msg_->yaw,
+                rc_msg_->aux1, rc_msg_->aux2, rc_msg_->aux3, rc_msg_->aux4);
         } else {
-            RCLCPP_INFO(node_->get_logger(), "No RC Input message received");
+            RCLCPP_INFO(node_->get_logger(), "No Manual Control message received");
         }
 
         // 电池信息

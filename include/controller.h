@@ -6,7 +6,7 @@
 #define __CONTROLLER_H
 
 #include "rclcpp/rclcpp.hpp"
-#include "mavros_msgs/msg/attitude_target.hpp"
+#include "px4_msgs/msg/vehicle_attitude_setpoint.hpp"
 #include "quadrotor_msgs/msg/px4ctrl_debug.hpp"
 #include <queue>
 #include <Eigen/Dense>

@@ -4,7 +4,7 @@
 /**:
   ros__parameters:
     # 基础物理参数
-    mass        : 2.9    # 飞行器质量(kg)
+    mass        : 1.3    # 飞行器质量(kg)
     gra         : 9.81   # 重力加速度(m/s^2)
     pose_solver : 1      # 位姿解算器选择: 0-ZhepeiWang方法(考虑阻力,奇异性小), 1-ZhepeiWang方法, 2-基于旋翼阻力
     ctrl_freq_max   : 100.0    # 最大控制频率(Hz)

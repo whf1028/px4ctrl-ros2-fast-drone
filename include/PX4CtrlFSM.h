@@ -5,9 +5,7 @@
 
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
-#include <mavros_msgs/srv/set_mode.hpp>
-#include <mavros_msgs/srv/command_long.hpp>
-#include <mavros_msgs/srv/command_bool.hpp>
+#include <px4_msgs/msg/vehicle_command.hpp>
 
 #include "input.h"
 #include "controller.h"
@@ -47,12 +45,11 @@ public:
 	
 	// ROS2发布者和服务客户端
 	rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr traj_start_trigger_pub;  // 轨迹触发发布者
-	rclcpp::Publisher<mavros_msgs::msg::AttitudeTarget>::SharedPtr ctrl_FCU_pub;  // 控制指令发布者
+	rclcpp::Publisher<px4_msgs::msg::VehicleAttitudeSetpoint>::SharedPtr ctrl_FCU_pub;  // 控制指令发布者
 	rclcpp::Publisher<quadrotor_msgs::msg::Px4ctrlDebug>::SharedPtr debug_pub;  // 调试信息发布者
 	
-	rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr set_FCU_mode_client;  // 设置飞控模式服务客户端
-	rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr arming_client;  // 解锁服务客户端
-	rclcpp::Client<mavros_msgs::srv::CommandLong>::SharedPtr reboot_FCU_client;  // 重启飞控服务客户端
+	// 使用VehicleCommand替代mavros服务
+	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr vehicle_command_pub;  // 飞控命令发布器
 
 	quadrotor_msgs::msg::Px4ctrlDebug debug_msg;  // 调试消息
 
