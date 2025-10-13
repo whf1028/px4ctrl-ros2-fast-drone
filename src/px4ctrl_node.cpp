@@ -5,12 +5,12 @@
 #include <sstream>
 #include <cstdlib>
 
-#define TEST_OPEN 1 // 0: 不测试，1: 测试
+#define TEST_OPEN 0 // 0: 不测试，1: 测试
 
 // 信号处理函数，用于优雅地处理Ctrl+C等终止信号
-void mySigintHandler(int sig)
+void mySigintHandler(int /* sig */)
 {
-    RCLCPP_INFO(rclcpp::get_logger("px4ctrl_node"), "[px4ctrl_node] exit..."); // 打印退出信息
+    FLIGHT_LOG_INFO(PX4CTRL, "[px4ctrl_node] exit..."); // 打印退出信息
     rclcpp::shutdown();               // 关闭ROS 2节点
 }
 
@@ -20,7 +20,15 @@ int main(int argc, char **argv)
     /*产生一个px4ctrl的节点*/
     auto node = std::make_shared<rclcpp::Node>("px4ctrl_node");
     // 设置日志级别为DEBUG
-    rcutils_logging_set_logger_level(node->get_logger().get_name(), RCUTILS_LOG_SEVERITY_DEBUG);
+    (void)rcutils_logging_set_logger_level(node->get_logger().get_name(), RCUTILS_LOG_SEVERITY_DEBUG);
+    
+    // 设置全局日志级别为DEBUG
+    (void)rcutils_logging_set_default_logger_level(RCUTILS_LOG_SEVERITY_DEBUG);
+    
+    // 设置所有ROS2日志级别为DEBUG
+    (void)rcutils_logging_set_logger_level("rclcpp", RCUTILS_LOG_SEVERITY_DEBUG);
+    (void)rcutils_logging_set_logger_level("rcl", RCUTILS_LOG_SEVERITY_DEBUG);
+    (void)rcutils_logging_set_logger_level("rcutils", RCUTILS_LOG_SEVERITY_DEBUG);
     
     // 注册信号处理函数
     signal(SIGINT, mySigintHandler);
@@ -44,19 +52,19 @@ int main(int argc, char **argv)
         setenv("FLIGHT_LOG_LEVEL", "DEBUG", 0);
     }
     
-    RCLCPP_INFO(node->get_logger(), "FlightLogger: 自动配置日志记录");
-    RCLCPP_INFO(node->get_logger(), "日志目录: %s", std::getenv("FLIGHT_LOG_DIR"));
-    RCLCPP_INFO(node->get_logger(), "会话ID: %s", std::getenv("FLIGHT_LOG_SESSION_ID"));
+    FLIGHT_LOG_INFO(SYSTEM, "FlightLogger: 自动配置日志记录");
+    FLIGHT_LOG_INFO(SYSTEM, "日志目录: %s", std::getenv("FLIGHT_LOG_DIR"));
+    FLIGHT_LOG_INFO(SYSTEM, "会话ID: %s", std::getenv("FLIGHT_LOG_SESSION_ID"));
     
     // 初始化FlightLogger
     auto& logger = px4ctrl::FlightLogger::getInstance();
     if (logger.initialize(std::getenv("FLIGHT_LOG_DIR"), std::getenv("FLIGHT_LOG_SESSION_ID"))) {
-        RCLCPP_INFO(node->get_logger(), "FlightLogger: 日志目录创建成功");
+        FLIGHT_LOG_INFO(SYSTEM, "FlightLogger: 日志目录创建成功");
         FLIGHT_LOG_INFO(PX4CTRL, "PX4Ctrl节点启动，日志系统初始化完成");
         FLIGHT_LOG_DEBUG(SYSTEM, "系统环境配置完成 - 日志目录: %s, 会话ID: %s", 
                         std::getenv("FLIGHT_LOG_DIR"), std::getenv("FLIGHT_LOG_SESSION_ID"));
     } else {
-        RCLCPP_WARN(node->get_logger(), "FlightLogger: 日志系统初始化失败");
+        FLIGHT_LOG_WARN(SYSTEM, "FlightLogger: 日志系统初始化失败");
         FLIGHT_LOG_ERROR(SYSTEM, "日志系统初始化失败，将使用控制台输出");
     }
     
@@ -133,17 +141,17 @@ int main(int argc, char **argv)
             FLIGHT_LOG_WARN(SENSOR, "遥控器已禁用 (no_RC=true)");
         }
 
-        // 7. 订阅电池状态
-        FLIGHT_LOG_INFO(SENSOR, "创建电池状态订阅器: /fmu/out/battery_status");
+        // 7. 订阅电池状态（通过电池桥接器转换后的标准消息）
+        FLIGHT_LOG_INFO(SENSOR, "创建电池状态订阅器: /px4/battery_state");
         auto bat_sub = node->create_subscription<sensor_msgs::msg::BatteryState>(
-            "/fmu/out/battery_status", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/px4/battery_state", rclcpp::QoS(10).best_effort().transient_local(),
             std::bind(&Test::batteryCallback, &test, std::placeholders::_1));
-        FLIGHT_LOG_DEBUG(SENSOR, "电池状态订阅器创建完成，QoS: reliable");
+        FLIGHT_LOG_DEBUG(SENSOR, "电池状态订阅器创建完成，QoS: best_effort + transient_local");
 
         // 8. 订阅起飞降落命令
         FLIGHT_LOG_INFO(MISSION, "创建起飞降落订阅器: takeoff_land");
         auto takeoff_land_sub = node->create_subscription<quadrotor_msgs::msg::TakeoffLand>(
-            "takeoff_land", rclcpp::QoS(5).reliable().durability_volatile(),
+            "/takeoff_land", rclcpp::QoS(5).reliable().durability_volatile(),
             std::bind(&Test::takeoffLandCallback, &test, std::placeholders::_1));
         FLIGHT_LOG_DEBUG(MISSION, "起飞降落订阅器创建完成，QoS: reliable");
     #elif TEST_OPEN == 0
@@ -180,24 +188,71 @@ int main(int argc, char **argv)
 
         // 6. 订阅遥控器数据（如果启用）
         rclcpp::Subscription<px4_msgs::msg::ManualControlSetpoint>::SharedPtr rc_sub;
+        
+        // 详细记录起飞降落参数配置
+        FLIGHT_LOG_INFO(SENSOR, "📋 [参数检查] 起飞降落配置参数:");
+        FLIGHT_LOG_INFO(SENSOR, "   - 自动起降启用: %s", param.takeoff_land.enable ? "是" : "否");
+        FLIGHT_LOG_INFO(SENSOR, "   - 自动解锁启用: %s", param.takeoff_land.enable_auto_arm ? "是" : "否");
+        FLIGHT_LOG_INFO(SENSOR, "   - 无遥控器模式: %s", param.takeoff_land.no_RC ? "是" : "否");
+        FLIGHT_LOG_INFO(SENSOR, "   - 起飞高度: %.2fm", param.takeoff_land.height);
+        FLIGHT_LOG_INFO(SENSOR, "   - 起降速度: %.2fm/s", param.takeoff_land.speed);
+        
+        FLIGHT_LOG_INFO(SENSOR, "🔧 [RC订阅] 开始检查遥控器数据订阅条件...");
+        
         if (!param.takeoff_land.no_RC)
         {
-            // 修改主题：/mavros/rc/in -> /fmu/out/manual_control_setpoint
-            rc_sub = node->create_subscription<px4_msgs::msg::ManualControlSetpoint>(
-                "/fmu/out/manual_control_setpoint", rclcpp::QoS(10).best_effort().durability_volatile(),
-                std::bind(&RC_Data_t::feed, &fsm.rc_data, std::placeholders::_1));
+            FLIGHT_LOG_INFO(SENSOR, "✅ [RC订阅] 遥控器数据订阅已启用 - 开始创建订阅器");
+            FLIGHT_LOG_INFO(SENSOR, "📡 [RC订阅] 订阅话题: /fmu/out/manual_control_setpoint");
+            FLIGHT_LOG_INFO(SENSOR, "⚙️ [RC订阅] QoS配置: best_effort, durability_volatile, 队列大小: 10");
+            
+            try {
+                // 创建QoS配置 - 匹配PX4发布方的配置
+                auto qos = rclcpp::QoS(10).best_effort().transient_local();
+                FLIGHT_LOG_INFO(SENSOR, "🔧 [RC订阅] QoS配置详情:");
+                FLIGHT_LOG_INFO(SENSOR, "   - 队列深度: 10");
+                FLIGHT_LOG_INFO(SENSOR, "   - 可靠性: best_effort");
+                FLIGHT_LOG_INFO(SENSOR, "   - 持久性: transient_local (匹配PX4发布方)");
+                FLIGHT_LOG_INFO(SENSOR, "🎯 [RC订阅] QoS配置已修复，现在与PX4发布方匹配！");
+                
+                rc_sub = node->create_subscription<px4_msgs::msg::ManualControlSetpoint>(
+                    "/fmu/out/manual_control_setpoint", qos,
+                    std::bind(&RC_Data_t::feed, &fsm.rc_data, std::placeholders::_1));
+                
+                FLIGHT_LOG_INFO(SENSOR, "✅ [RC订阅] 遥控器订阅器创建成功");
+                FLIGHT_LOG_INFO(SENSOR, "📊 [RC订阅] 订阅器状态: 已激活，等待RC数据...");
+                FLIGHT_LOG_INFO(SENSOR, "⏱️ [RC订阅] RC数据超时阈值: %.1f秒", param.msg_timeout.rc);
+                
+                // 添加订阅器状态检查
+                if (rc_sub) {
+                    FLIGHT_LOG_INFO(SENSOR, "✅ [RC订阅] 订阅器指针有效");
+                } else {
+                    FLIGHT_LOG_ERROR(SENSOR, "❌ [RC订阅] 订阅器指针为空！");
+                }
+                
+            } catch (const std::exception& e) {
+                FLIGHT_LOG_ERROR(SENSOR, "❌ [RC订阅] 遥控器订阅器创建失败: %s", e.what());
+                FLIGHT_LOG_ERROR(SENSOR, "🚨 [RC订阅] 这将导致RC数据超时，影响起飞功能！");
+            }
+        } else {
+            FLIGHT_LOG_WARN(SENSOR, "⚠️ [RC订阅] 遥控器已禁用 (no_RC=true)");
+            FLIGHT_LOG_WARN(SENSOR, "🔧 [RC订阅] 无遥控器模式配置 - 依赖自动解锁功能");
+            FLIGHT_LOG_WARN(SENSOR, "📋 [RC订阅] 当前配置: 自动起降=%s, 自动解锁=%s", 
+                           param.takeoff_land.enable ? "启用" : "禁用",
+                           param.takeoff_land.enable_auto_arm ? "启用" : "禁用");
         }
 
-        // 7. 订阅电池状态
-        // 修改主题：/mavros/battery -> /fmu/out/battery_status
+        // 7. 订阅电池状态（通过电池桥接器转换后的标准消息）
+        // 修改主题：/mavros/battery -> /px4/battery_state (通过电池桥接器转换)
         auto bat_sub = node->create_subscription<sensor_msgs::msg::BatteryState>(
-            "/fmu/out/battery_status", rclcpp::QoS(10).reliable().durability_volatile(),
+            "/px4/battery_state", rclcpp::QoS(10).best_effort().transient_local(),
             std::bind(&Battery_Data_t::feed, &fsm.bat_data, std::placeholders::_1));
 
         // 8. 订阅起飞降落命令
+        FLIGHT_LOG_INFO(PX4CTRL, "订阅起飞降落命令: /takeoff_land");
         auto takeoff_land_sub = node->create_subscription<quadrotor_msgs::msg::TakeoffLand>(
-            "takeoff_land", rclcpp::QoS(5).reliable().durability_volatile(),
+            "/takeoff_land", rclcpp::QoS(5).reliable().durability_volatile(),
             std::bind(&Takeoff_Land_Data_t::feed, &fsm.takeoff_land_data, std::placeholders::_1));
+        FLIGHT_LOG_DEBUG(PX4CTRL, "订阅起飞降落命令完成");
     #endif // TEST_OPEN
 
     // 创建 best effort QoS profile
@@ -226,23 +281,34 @@ int main(int argc, char **argv)
     fsm.vehicle_command_pub = node->create_publisher<px4_msgs::msg::VehicleCommand>(
         "/fmu/in/vehicle_command", 10);
     FLIGHT_LOG_DEBUG(PX4CTRL, "车辆命令发布器创建完成");
+    
+    // 创建Offboard模式相关发布器
+    FLIGHT_LOG_INFO(PX4CTRL, "创建Offboard控制模式发布器: /fmu/in/offboard_control_mode");
+    fsm.offboard_control_mode_pub = node->create_publisher<px4_msgs::msg::OffboardControlMode>(
+        "/fmu/in/offboard_control_mode", best_effort_qos);
+    FLIGHT_LOG_DEBUG(PX4CTRL, "Offboard控制模式发布器创建完成");
+    
+    FLIGHT_LOG_INFO(PX4CTRL, "创建轨迹设定点发布器: /fmu/in/trajectory_setpoint");
+    fsm.trajectory_setpoint_pub = node->create_publisher<px4_msgs::msg::TrajectorySetpoint>(
+        "/fmu/in/trajectory_setpoint", best_effort_qos);
+    FLIGHT_LOG_DEBUG(PX4CTRL, "轨迹设定点发布器创建完成");
 
     // 检查遥控器状态
     if (param.takeoff_land.no_RC)
     {
         //遥控器已禁用，请注意安全！
-        RCLCPP_WARN(node->get_logger(), "[PX4CTRL] Remote controller disabled, be careful!");
+        FLIGHT_LOG_WARN(PX4CTRL, "[PX4CTRL] Remote controller disabled, be careful!");
     }
     else
     {
-        RCLCPP_INFO(node->get_logger(), "[PX4CTRL] Waiting for RC");//等待遥控器连接
+        FLIGHT_LOG_INFO(PX4CTRL, "[PX4CTRL] Waiting for RC");//等待遥控器连接
         while (rclcpp::ok())
         {
             rclcpp::spin_some(node);
             rclcpp::Time current_time = node->now();
             if (fsm.rc_is_received(current_time))
             {
-                RCLCPP_INFO(node->get_logger(), "[PX4CTRL] RC received.");//连接成功
+                FLIGHT_LOG_INFO(PX4CTRL, "[PX4CTRL] RC received.");//连接成功
                 break;
             }
             rclcpp::sleep_for(std::chrono::milliseconds(100));//等待100ms
@@ -257,7 +323,7 @@ int main(int argc, char **argv)
         rclcpp::sleep_for(std::chrono::seconds(1));
         if (trials++ > 5) // 等待时间不能超过5s
         {
-            RCLCPP_WARN(node->get_logger(), "USB connection not detected, but continuing with PX4 communication...");
+            FLIGHT_LOG_WARN(PX4CTRL, "USB connection not detected, but continuing with PX4 communication...");
             break; // 添加break语句，避免无限循环
         }
     }

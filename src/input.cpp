@@ -1,4 +1,5 @@
 #include "input.h"
+#include "FlightLogger.h"
 
 // RC_Data_t类用于处理遥控器输入数据
 // 构造函数1-----------------------------------------------------------
@@ -29,8 +30,10 @@ RC_Data_t::RC_Data_t(const rclcpp::Node::SharedPtr& node)
 
 void RC_Data_t::feed(const px4_msgs::msg::ManualControlSetpoint::SharedPtr pMsg)
 {
+    // 记录RC数据接收时间
+    rclcpp::Time now = node_->now();
     msg = *pMsg;
-    rcv_stamp = node_->now();
+    rcv_stamp = now;
 
     // 使用ManualControlSetpoint的字段映射到RC通道
     // 通道1-4分别对应:横滚、俯仰、油门、偏航
@@ -38,6 +41,39 @@ void RC_Data_t::feed(const px4_msgs::msg::ManualControlSetpoint::SharedPtr pMsg)
     ch[1] = msg.pitch;  // 俯仰
     ch[2] = msg.throttle; // 油门
     ch[3] = msg.yaw;    // 偏航
+    
+    // 详细日志记录遥控器数据
+    static int rc_log_counter = 0;
+    static rclcpp::Time last_rc_time = now;
+    static bool first_rc_received = false;
+    static int total_rc_count = 0;
+    
+    total_rc_count++;
+    
+    // 记录第一次RC数据接收
+    if (!first_rc_received) {
+        FLIGHT_LOG_INFO(SENSOR, "🎉 [RC数据] 首次接收到遥控器数据！");
+        FLIGHT_LOG_INFO(SENSOR, "📡 [RC数据] 数据源: %d, 时间戳: %.3f", 
+                       msg.data_source, rcv_stamp.seconds());
+        FLIGHT_LOG_INFO(SENSOR, "🔧 [RC数据] 回调函数正常工作，订阅器连接成功！");
+        first_rc_received = true;
+    }
+    
+    // 每100次接收记录一次统计信息
+    if (total_rc_count % 100 == 0) {
+        FLIGHT_LOG_INFO(SENSOR, "📊 [RC数据] 接收统计 - 总接收次数: %d", total_rc_count);
+    }
+    
+    if (++rc_log_counter % 10 == 0) { // 每10次记录一次，进一步增加日志频率
+        double time_since_last = (now - last_rc_time).seconds();
+        FLIGHT_LOG_INFO(SENSOR, "📊 [RC数据] 控制通道 - Roll: %.3f, Pitch: %.3f, Throttle: %.3f, Yaw: %.3f", 
+                     ch[0], ch[1], ch[2], ch[3]);
+        FLIGHT_LOG_INFO(SENSOR, "🔧 [RC数据] 辅助通道 - Aux1: %.3f, Aux2: %.3f, Aux3: %.3f, Aux4: %.3f", 
+                     msg.aux1, msg.aux2, msg.aux3, msg.aux4);
+        FLIGHT_LOG_DEBUG(SENSOR, "⏱️ [RC数据] 时间信息 - 接收时间: %.3f, 距上次: %.3fs, 数据源: %d", 
+                     rcv_stamp.seconds(), time_since_last, msg.data_source);
+        last_rc_time = now;
+    }
     
     // 设置死区,消除微小的摇杆抖动
     for (int i = 0; i < 4; i++)
@@ -104,7 +140,7 @@ void RC_Data_t::feed(const px4_msgs::msg::ManualControlSetpoint::SharedPtr pMsg)
     if (!is_hover_mode && !is_command_mode)
     {
                 // 添加toggle_reboot的输出
-        RCLCPP_INFO(node_->get_logger(), "hhh");
+        FLIGHT_LOG_INFO(SENSOR, "hhh");
         if (last_reboot_cmd < REBOOT_THRESHOLD_VALUE && reboot_cmd > REBOOT_THRESHOLD_VALUE)
             toggle_reboot = true;
         else
@@ -127,7 +163,7 @@ void RC_Data_t::check_validity()
     }
     else
     {
-        RCLCPP_ERROR(node_->get_logger(), "RC data validity check fail. mode=%f, gear=%f, reboot_cmd=%f", mode, gear, reboot_cmd);
+        FLIGHT_LOG_ERROR(SENSOR, "RC data validity check fail. mode=%f, gear=%f, reboot_cmd=%f", mode, gear, reboot_cmd);
     }
 }
 
@@ -156,6 +192,19 @@ void Odom_Data_t::feed(const nav_msgs::msg::Odometry::SharedPtr pMsg)
     recv_new_msg = true;
 
     uav_utils::extract_odometry(pMsg, p, v, q, w);
+    
+    // 详细日志记录里程计数据
+    static int odom_log_counter = 0;
+    if (++odom_log_counter % 20 == 0) { // 每20次记录一次，进一步增加日志频率
+        FLIGHT_LOG_INFO(SENSOR, "里程计数据 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f]", 
+                     p(0), p(1), p(2), v(0), v(1), v(2));
+        FLIGHT_LOG_INFO(SENSOR, "里程计数据 - 角速度: [%.3f, %.3f, %.3f]", 
+                     w(0), w(1), w(2));
+        FLIGHT_LOG_DEBUG(SENSOR, "里程计四元数: [%.3f, %.3f, %.3f, %.3f]", 
+                     q.w(), q.x(), q.y(), q.z());
+        FLIGHT_LOG_DEBUG(SENSOR, "里程计时间戳: %.3f, 接收时间: %.3f", 
+                     msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9, rcv_stamp.seconds());
+    }
 
 // #define VEL_IN_BODY
 #ifdef VEL_IN_BODY /* Set to 1 if the velocity in odom topic is relative to current body frame, not to world frame.*/
@@ -169,13 +218,17 @@ void Odom_Data_t::feed(const nav_msgs::msg::Odometry::SharedPtr pMsg)
 #endif
 
     // 检查频率
-    static int one_min_count = 9999;
+    // 修复频率检查逻辑：将初始化值从9999改为0，解决循环误报问题
+    // 原因：原代码one_min_count=9999导致第一次检查时计数为10000，跳过告警检查
+    // 但后续1秒内如果消息数量<100就会误报，造成持续告警
+    // 修改后：正常统计1秒内消息数量，只有真正频率<100Hz时才告警
+    static int one_min_count = 0;  // 修改：从9999改为0
     static rclcpp::Time last_clear_count_time = node_->now();
     if ( (now - last_clear_count_time).seconds() > 1.0 )
     {
         if ( one_min_count < 100 )
         {
-            RCLCPP_WARN(node_->get_logger(), "ODOM frequency seems lower than 100Hz, which is too low!");
+            FLIGHT_LOG_WARN(SENSOR, "ODOM frequency seems lower than 100Hz, which is too low!");
         }
         one_min_count = 0;
         last_clear_count_time = now;
@@ -210,16 +263,31 @@ void Imu_Data_t::feed(const sensor_msgs::msg::Imu::SharedPtr pMsg)
     q.y() = msg.orientation.y;
     q.z() = msg.orientation.z;
     q.w() = msg.orientation.w;
+    
+    // 详细日志记录IMU数据
+    static int imu_log_counter = 0;
+    if (++imu_log_counter % 30 == 0) { // 每30次记录一次
+        FLIGHT_LOG_INFO(SENSOR, "IMU数据 - 角速度: [%.3f, %.3f, %.3f], 线性加速度: [%.3f, %.3f, %.3f]", 
+                     w(0), w(1), w(2), a(0), a(1), a(2));
+        FLIGHT_LOG_DEBUG(SENSOR, "IMU四元数: [%.3f, %.3f, %.3f, %.3f]", 
+                     q.w(), q.x(), q.y(), q.z());
+        FLIGHT_LOG_DEBUG(SENSOR, "IMU时间戳: %.3f, 接收时间: %.3f", 
+                     msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9, rcv_stamp.seconds());
+    }
 
     // check the frequency
-    static int one_min_count = 9999;
+    // 修复频率检查逻辑：将初始化值从9999改为0，解决循环误报问题
+    // 原因：原代码one_min_count=9999导致第一次检查时计数为10000，跳过告警检查
+    // 但后续1秒内如果消息数量<100就会误报，造成持续告警
+    // 修改后：正常统计1秒内消息数量，只有真正频率<100Hz时才告警
+    static int one_min_count = 0;  // 修改：从9999改为0
     static rclcpp::Time last_clear_count_time = node_->now();;
     if ( (now - last_clear_count_time).seconds() > 1.0 )
     {
         if ( one_min_count < 100 )
         {
             //要求低于10ms才采样速度
-            RCLCPP_WARN(node_->get_logger(), "IMU frequency seems lower than 100Hz, which is too low!");
+            FLIGHT_LOG_WARN(SENSOR, "IMU frequency seems lower than 100Hz, which is too low!");
         }
         one_min_count = 0;
         last_clear_count_time = now;
@@ -236,6 +304,13 @@ State_Data_t::State_Data_t(const rclcpp::Node::SharedPtr& node)
 void State_Data_t::feed(const px4_msgs::msg::VehicleStatus::SharedPtr pMsg)
 {
     current_state = *pMsg;
+    
+    // 使用静态计数器，避免频繁打印日志
+    static int log_counter = 0;
+    if (++log_counter % 50 == 0) {  // 每50次打印一次
+        LISTENER_LOG_INFO("飞控状态更新 - 导航状态: %d, 解锁状态: %d", 
+                         pMsg->nav_state, pMsg->arming_state);
+    }
 }
 
 //构造函数5-----------------------------------------------------------
@@ -247,6 +322,15 @@ ExtendedState_Data_t::ExtendedState_Data_t(const rclcpp::Node::SharedPtr& node)
 void ExtendedState_Data_t::feed(const px4_msgs::msg::VehicleLandDetected::SharedPtr pMsg)
 {
     current_extended_state = *pMsg;
+    
+    // 使用静态计数器，避免频繁打印日志
+    // 扩展状态信息频率较低，每20次记录一次
+    static int log_counter = 0;
+    if (++log_counter % 20 == 0) {
+        LISTENER_LOG_INFO("扩展状态更新 - 着陆检测: %s, 着陆状态: %s", 
+                         pMsg->landed ? "已着陆" : "未着陆",
+                         pMsg->in_ground_effect ? "地面效应中" : "正常飞行");
+    }
 }
 
 //构造函数6-----------------------------------------------------------
@@ -282,6 +366,14 @@ void Command_Data_t::feed(const quadrotor_msgs::msg::PositionCommand::SharedPtr 
 
     yaw = uav_utils::normalize_angle(msg.yaw);
     yaw_rate = msg.yaw_dot;
+    
+    // 使用静态计数器，避免频繁打印日志
+    // cmd主题频率较高，每100次记录一次
+    static int log_counter = 0;
+    if (++log_counter % 100 == 0) {
+        LISTENER_LOG_INFO("位置指令更新 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f], 偏航: %.3f", 
+                         p(0), p(1), p(2), v(0), v(1), v(2), yaw);
+    }
 }
 
 //构造函数7-----------------------------------------------------------
@@ -311,7 +403,7 @@ void Battery_Data_t::feed(const sensor_msgs::msg::BatteryState::SharedPtr pMsg)
     {
         if ((rcv_stamp - last_print_t).seconds() > 10)
         {
-            RCLCPP_INFO(node_->get_logger(), "Voltage=%.3f, percentage=%.3f", volt, percentage);
+            FLIGHT_LOG_INFO(SENSOR, "Voltage=%.3f, percentage=%.3f", volt, percentage);
             last_print_t = rcv_stamp;
         }
     }
@@ -339,4 +431,29 @@ void Takeoff_Land_Data_t::feed(const quadrotor_msgs::msg::TakeoffLand::SharedPtr
 
     triggered = true;
     takeoff_land_cmd = pMsg->takeoff_land_cmd;
+    
+    // 详细记录起飞降落命令接收情况
+    FLIGHT_LOG_INFO(MISSION, "🎯 [正常模式] 起飞降落命令接收 - 命令类型: %d", pMsg->takeoff_land_cmd);
+    
+    // 根据命令类型输出详细信息
+    switch(pMsg->takeoff_land_cmd) {
+        case 1:
+            FLIGHT_LOG_INFO(MISSION, "🚀 [正常模式] 起飞命令已接收 - 触发状态机处理");
+            FLIGHT_LOG_INFO(MISSION, "📋 [正常模式] 起飞命令详情 - 命令类型: %d", 
+                       pMsg->takeoff_land_cmd);
+            FLIGHT_LOG_INFO(MISSION, "🔄 [正常模式] 状态机将检查起飞条件并执行起飞序列");
+            break;
+        case 2:
+            FLIGHT_LOG_INFO(MISSION, "🛬 [正常模式] 降落命令已接收 - 触发状态机处理");
+            FLIGHT_LOG_INFO(MISSION, "📋 [正常模式] 降落命令详情 - 命令类型: %d", 
+                       pMsg->takeoff_land_cmd);
+            FLIGHT_LOG_INFO(MISSION, "🔄 [正常模式] 状态机将执行安全降落序列");
+            break;
+        default:
+            FLIGHT_LOG_WARN(MISSION, "⚠️ [正常模式] 未知的起飞降落命令: %d", pMsg->takeoff_land_cmd);
+            break;
+    }
+    
+    // 记录触发状态
+    FLIGHT_LOG_INFO(MISSION, "✅ [正常模式] 起飞降落数据触发标志已设置: triggered=%s", triggered ? "true" : "false");
 }

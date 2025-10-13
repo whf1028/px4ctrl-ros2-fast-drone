@@ -34,7 +34,8 @@ public:
         FLIGHT_PHASE = 4,
         CONTROLLER = 5,
         SENSOR = 6,
-        MISSION = 7
+        MISSION = 7,
+        TOPIC = 8
     };
     
     // 单例模式
@@ -102,6 +103,22 @@ private:
 
 #define FLIGHT_LOG_FATAL(category, ...) \
     px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::FATAL, px4ctrl::FlightLogger::LogCategory::category, __VA_ARGS__)
+
+// 话题监听日志宏定义
+#define LISTENER_LOG_DEBUG(...) \
+    px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::DEBUG, px4ctrl::FlightLogger::LogCategory::TOPIC, __VA_ARGS__)
+
+#define LISTENER_LOG_INFO(...) \
+    px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::INFO, px4ctrl::FlightLogger::LogCategory::TOPIC, __VA_ARGS__)
+
+#define LISTENER_LOG_WARN(...) \
+    px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::WARN, px4ctrl::FlightLogger::LogCategory::TOPIC, __VA_ARGS__)
+
+#define LISTENER_LOG_ERROR(...) \
+    px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::ERROR, px4ctrl::FlightLogger::LogCategory::TOPIC, __VA_ARGS__)
+
+#define LISTENER_LOG_FATAL(...) \
+    px4ctrl::FlightLogger::getInstance().log(px4ctrl::FlightLogger::LogLevel::FATAL, px4ctrl::FlightLogger::LogCategory::TOPIC, __VA_ARGS__)
 
 } // namespace px4ctrl
 

@@ -35,6 +35,24 @@ public:
 		double bat;     // 电池消息超时时间
 	};
 
+	// 飞控操作超时参数结构体
+	struct FCUOperationTimeout
+	{
+		double offboard_mode_switch;  // Offboard模式切换超时时间(秒)
+		double arm_disarm_operation;  // 解锁/上锁操作超时时间(秒)
+		double reboot_operation;      // 重启操作超时时间(秒)
+		double offboard_prep_time;    // Offboard模式准备时间(秒)
+	};
+
+	// 飞控操作检查间隔参数结构体
+	struct FCUOperationIntervals
+	{
+		int offboard_check_ms;        // Offboard模式检查间隔(毫秒)
+		int arm_disarm_check_ms;      // 解锁/上锁检查间隔(毫秒)
+		int reboot_check_ms;          // 重启检查间隔(毫秒)
+		int offboard_prep_ms;         // Offboard模式准备发送间隔(毫秒)
+	};
+
 	// 推力映射参数结构体
 	struct ThrustMapping
 	{
@@ -69,6 +87,8 @@ public:
 	Gain gain;                // 控制增益参数
 	RotorDrag rt_drag;        // 旋翼阻力参数
 	MsgTimeout msg_timeout;    // 消息超时参数
+	FCUOperationTimeout fcu_timeout;  // 飞控操作超时参数
+	FCUOperationIntervals fcu_intervals;  // 飞控操作检查间隔参数
 	RCReverse rc_reverse;      // 遥控器反向设置
 	ThrustMapping thr_map;     // 推力映射参数
 	AutoTakeoffLand takeoff_land; // 自动起降参数
@@ -116,7 +136,7 @@ private:
 			RCLCPP_ERROR(node->get_logger(), "Param: %s not found.", name.c_str());
 			throw std::runtime_error("Parameter not found: " + name);
 		}
-	};
+	}
 };
 
 #endif

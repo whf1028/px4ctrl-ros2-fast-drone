@@ -1,0 +1,28 @@
+# 飞控操作参数配置文件
+# 用于配置PX4CtrlFSM中飞控操作的超时时间和检查间隔
+
+# 飞控操作超时参数
+fcu_timeout:
+  offboard_mode_switch: 2.0    # Offboard模式切换超时时间(秒)
+  arm_disarm_operation: 3.0     # 解锁/上锁操作超时时间(秒)
+  reboot_operation: 10.0       # 重启操作超时时间(秒)
+  offboard_prep_time: 2.0      # Offboard模式准备时间(秒)
+
+# 飞控操作检查间隔参数
+fcu_intervals:
+  offboard_check_ms: 50        # Offboard模式检查间隔(毫秒)
+  arm_disarm_check_ms: 100     # 解锁/上锁检查间隔(毫秒)
+  reboot_check_ms: 200         # 重启检查间隔(毫秒)
+  offboard_prep_ms: 50         # Offboard模式准备发送间隔(毫秒)
+
+# 参数说明：
+# - 超时时间：根据实际硬件和网络环境调整
+#   - 较快的硬件可以设置更短的超时时间
+#   - 较慢的网络环境需要更长的超时时间
+# - 检查间隔：平衡响应性和CPU使用率
+#   - 更短的间隔提供更快的响应，但消耗更多CPU
+#   - 更长的间隔减少CPU使用，但响应较慢
+# - 建议值：
+#   - 开发环境：使用默认值
+#   - 生产环境：根据实际测试结果调整
+#   - 高延迟网络：增加超时时间，减少检查频率

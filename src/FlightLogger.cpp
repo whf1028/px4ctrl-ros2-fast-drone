@@ -50,6 +50,7 @@ bool FlightLogger::initialize(const std::string& log_base_dir, const std::string
         std::filesystem::create_directories(log_base_dir_ + "/controller");
         std::filesystem::create_directories(log_base_dir_ + "/sensor");
         std::filesystem::create_directories(log_base_dir_ + "/mission");
+        std::filesystem::create_directories(log_base_dir_ + "/listener_topic");
     } catch (const std::exception& e) {
         std::cerr << "Failed to create log directories: " << e.what() << std::endl;
         return false;
@@ -59,7 +60,12 @@ bool FlightLogger::initialize(const std::string& log_base_dir, const std::string
 }
 
 void FlightLogger::log(LogLevel level, LogCategory category, const std::string& message) {
-    if (!enabled_ || level < current_level_) {
+    // 注释掉比较逻辑，让所有级别的日志都打印
+    // if (!enabled_ || level > current_level_) {
+    //     return;
+    // }
+    
+    if (!enabled_) {
         return;
     }
     
@@ -77,7 +83,12 @@ void FlightLogger::log(LogLevel level, LogCategory category, const std::string& 
 }
 
 void FlightLogger::log(LogLevel level, LogCategory category, const char* format, ...) {
-    if (!enabled_ || level < current_level_) {
+    // 注释掉比较逻辑，让所有级别的日志都打印
+    // if (!enabled_ || level > current_level_) {
+    //     return;
+    // }
+    
+    if (!enabled_) {
         return;
     }
     
@@ -155,6 +166,7 @@ std::string FlightLogger::getLogCategoryString(LogCategory category) const {
         case LogCategory::CONTROLLER: return "controller";
         case LogCategory::SENSOR: return "sensor";
         case LogCategory::MISSION: return "mission";
+        case LogCategory::TOPIC: return "listener_topic";
         default: return "unknown";
     }
 }

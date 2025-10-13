@@ -6,9 +6,12 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <px4_msgs/msg/vehicle_command.hpp>
+#include <px4_msgs/msg/offboard_control_mode.hpp>
+#include <px4_msgs/msg/trajectory_setpoint.hpp>
 
 #include "input.h"
 #include "controller.h"
+#include "geometry_utils.h"
 
 // 自动起飞降落相关参数结构体
 struct AutoTakeoffLand_t
@@ -50,6 +53,10 @@ public:
 	
 	// 使用VehicleCommand替代mavros服务
 	rclcpp::Publisher<px4_msgs::msg::VehicleCommand>::SharedPtr vehicle_command_pub;  // 飞控命令发布器
+	
+	// Offboard模式相关发布者
+	rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr offboard_control_mode_pub;  // Offboard控制模式发布者
+	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr trajectory_setpoint_pub;  // 轨迹设定点发布者
 
 	quadrotor_msgs::msg::Px4ctrlDebug debug_msg;  // 调试消息
 
@@ -104,12 +111,16 @@ private:
 	// 飞控操作函数
 	bool toggle_offboard_mode(bool on_off);  // 切换offboard模式
 	bool toggle_arm_disarm(bool arm);        // 切换解锁/上锁状态
-	void reboot_FCU();                       // 重启飞控
+	bool reboot_FCU();                       // 重启飞控
 
 	// 发布函数
 	void publish_bodyrate_ctrl(const Controller_Output_t &u, const rclcpp::Time &stamp);  // 发布体速率控制指令
 	void publish_attitude_ctrl(const Controller_Output_t &u, const rclcpp::Time &stamp);  // 发布姿态控制指令
 	void publish_trigger(const nav_msgs::msg::Odometry &odom_msg);  // 发布触发消息
+	
+	// Offboard模式相关发布函数
+	void publish_offboard_control_mode();  // 发布OffboardControlMode消息
+	void publish_trajectory_setpoint();    // 发布TrajectorySetpoint消息
 };
 
 #endif

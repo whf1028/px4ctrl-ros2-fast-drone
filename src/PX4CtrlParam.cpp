@@ -1,4 +1,5 @@
 #include "PX4CtrlParam.h"
+#include "FlightLogger.h"
 
 /*
  * 参数文件使用方法：
@@ -10,6 +11,17 @@
 // 参数类的构造函数
 Parameter_t::Parameter_t()
 {
+    // 设置飞控操作超时参数的默认值
+    fcu_timeout.offboard_mode_switch = 2.0;    // Offboard模式切换超时时间(秒)
+    fcu_timeout.arm_disarm_operation = 3.0;     // 解锁/上锁操作超时时间(秒)
+    fcu_timeout.reboot_operation = 10.0;       // 重启操作超时时间(秒)
+    fcu_timeout.offboard_prep_time = 2.0;      // Offboard模式准备时间(秒)
+    
+    // 设置飞控操作检查间隔参数的默认值
+    fcu_intervals.offboard_check_ms = 50;      // Offboard模式检查间隔(毫秒)
+    fcu_intervals.arm_disarm_check_ms = 100;   // 解锁/上锁检查间隔(毫秒)
+    fcu_intervals.reboot_check_ms = 200;       // 重启检查间隔(毫秒)
+    fcu_intervals.offboard_prep_ms = 50;       // Offboard模式准备发送间隔(毫秒)
 }
 
 // 从ROS节点句柄读取并配置参数
@@ -73,6 +85,18 @@ void Parameter_t::config_from_ros_handle(const std::shared_ptr<rclcpp::Node>& no
     read_essential_param(node, "thrust_model.accurate_thrust_model", thr_map.accurate_thrust_model); // 是否使用精确推力模型
     read_essential_param(node, "thrust_model.hover_percentage", thr_map.hover_percentage); // 悬停油门百分比
 
+    // 飞控操作超时参数
+    read_essential_param(node, "fcu_timeout.offboard_mode_switch", fcu_timeout.offboard_mode_switch); // Offboard模式切换超时时间
+    read_essential_param(node, "fcu_timeout.arm_disarm_operation", fcu_timeout.arm_disarm_operation); // 解锁/上锁操作超时时间
+    read_essential_param(node, "fcu_timeout.reboot_operation", fcu_timeout.reboot_operation); // 重启操作超时时间
+    read_essential_param(node, "fcu_timeout.offboard_prep_time", fcu_timeout.offboard_prep_time); // Offboard模式准备时间
+
+    // 飞控操作检查间隔参数
+    read_essential_param(node, "fcu_intervals.offboard_check_ms", fcu_intervals.offboard_check_ms); // Offboard模式检查间隔
+    read_essential_param(node, "fcu_intervals.arm_disarm_check_ms", fcu_intervals.arm_disarm_check_ms); // 解锁/上锁检查间隔
+    read_essential_param(node, "fcu_intervals.reboot_check_ms", fcu_intervals.reboot_check_ms); // 重启检查间隔
+    read_essential_param(node, "fcu_intervals.offboard_prep_ms", fcu_intervals.offboard_prep_ms); // Offboard模式准备发送间隔
+
     // 将角度从度转换为弧度
     max_angle /= (180.0 / M_PI);
 
@@ -80,17 +104,17 @@ void Parameter_t::config_from_ros_handle(const std::shared_ptr<rclcpp::Node>& no
     if ( takeoff_land.enable_auto_arm && !takeoff_land.enable )
     {
         takeoff_land.enable_auto_arm = false;
-        RCLCPP_ERROR(node->get_logger(),"\"enable_auto_arm\" is only allowd with \"auto_takeoff_land\" enabled.");
+        FLIGHT_LOG_ERROR(PX4CTRL,"\"enable_auto_arm\" is only allowd with \"auto_takeoff_land\" enabled.");
     }
     if ( takeoff_land.no_RC && (!takeoff_land.enable_auto_arm || !takeoff_land.enable) )
     {
         takeoff_land.no_RC = false;
-        RCLCPP_ERROR(node->get_logger(), "\"no_RC\" is only allowd with both \"auto_takeoff_land\" and \"enable_auto_arm\" enabled.");
+        FLIGHT_LOG_ERROR(PX4CTRL, "\"no_RC\" is only allowd with both \"auto_takeoff_land\" and \"enable_auto_arm\" enabled.");
     }
 
     if ( thr_map.print_val )
     {
-        RCLCPP_WARN(node->get_logger(), "You should disable \"print_value\" if you are in regular usage.");
+        FLIGHT_LOG_WARN(PX4CTRL, "You should disable \"print_value\" if you are in regular usage.");
     }
 }
 
