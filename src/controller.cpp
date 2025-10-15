@@ -174,11 +174,39 @@ LinearControl::computeDesiredCollectiveThrustSignal(
     // 使用推力到加速度的映射系数计算油门百分比
     throttle_percentage = des_acc(2) / thr2acc_;
     
+    // ✅ 推力归一化：确保推力值在[-1, 1]范围内，符合PX4要求
+    double original_thrust = throttle_percentage;
+    bool thrust_limited = false;
+    
+    if (throttle_percentage > 1.0) {
+        FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [推力归一化] 推力值超出上限 - 原始值: %.6f, 限制为: 1.000", throttle_percentage);
+        throttle_percentage = 1.0;
+        thrust_limited = true;
+    } else if (throttle_percentage < -1.0) {
+        FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [推力归一化] 推力值超出下限 - 原始值: %.6f, 限制为: -1.000", throttle_percentage);
+        throttle_percentage = -1.0;
+        thrust_limited = true;
+    }
+    
+    // 记录推力归一化结果
+    if (thrust_limited) {
+        static int thrust_limit_count = 0;
+        thrust_limit_count++;
+        FLIGHT_LOG_INFO(CONTROLLER, "🔧 [推力归一化] 推力值已修正 - 原始值: %.6f → 修正值: %.6f, 变化量: %.6f (第%d次限制)", 
+                       original_thrust, throttle_percentage, throttle_percentage - original_thrust, thrust_limit_count);
+    }
+    
     // 详细日志记录推力信号计算
     static int thrust_log_counter = 0;
+    static int total_thrust_limits = 0;
     if (++thrust_log_counter % 50 == 0) { // 每50次记录一次
+        if (thrust_limited) {
+            total_thrust_limits++;
+        }
         FLIGHT_LOG_DEBUG(CONTROLLER, "推力信号计算 - Z轴加速度: %.3f, 推力映射系数: %.3f, 油门百分比: %.3f", 
                      des_acc(2), thr2acc_, throttle_percentage);
+        FLIGHT_LOG_INFO(CONTROLLER, "📊 [推力归一化统计] 推力限制统计 - 当前周期限制次数: %d, 总限制次数: %d, 限制率: %.1f%%", 
+                       thrust_limited ? 1 : 0, total_thrust_limits, (double)total_thrust_limits / thrust_log_counter * 100.0);
     }
 
     return throttle_percentage;

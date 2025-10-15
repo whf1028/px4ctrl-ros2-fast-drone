@@ -553,6 +553,9 @@ void PX4CtrlFSM::process()
 					   odom_data.p(2), takeoff_land.start_pose(2) + param.takeoff_land.height,
 					   (takeoff_land.start_pose(2) + param.takeoff_land.height) - odom_data.p(2));
 			
+			// 详细记录传入的速度参数
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [AUTO_TAKEOFF] 调用参数调试 - 传入速度参数: %.3fm/s", param.takeoff_land.speed);
+			
 			des = get_takeoff_land_des(param.takeoff_land.speed);
 			
 			// 详细记录起飞爬升阶段的期望状态
@@ -818,22 +821,12 @@ Desired_State_t PX4CtrlFSM::get_takeoff_land_des(const double speed)
 	rclcpp::Time now = node_->now();
 	
 	// 详细时间调试日志
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 当前时间: %.6f", now.seconds());
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - toggle_takeoff_land_time: %.6f", 
-			   takeoff_land.toggle_takeoff_land_time.seconds());
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 原始时间差: %.6fs", 
-			   (now - takeoff_land.toggle_takeoff_land_time).seconds());
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 电机加速时间: %.6fs", 
-			   AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
-	
 	double delta_t = (now - takeoff_land.toggle_takeoff_land_time).seconds() - (speed > 0 ? AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME : 0); // speed > 0 means takeoff
 	
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 调整后时间差: %.6fs", delta_t);
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [起飞爬升] 时间计算 - 当前时间: %.3f, 起始时间: %.3f, 原始时间差: %.3fs", 
-			   now.seconds(), takeoff_land.toggle_takeoff_land_time.seconds(), 
-			   (now - takeoff_land.toggle_takeoff_land_time).seconds());
-	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [起飞爬升] 时间计算 - 电机加速时间: %.3fs, 调整后时间差: %.3fs", 
-			   AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME, delta_t);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 当前时间: %.6f, 起始时间: %.6f", 
+			   now.seconds(), takeoff_land.toggle_takeoff_land_time.seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 原始时间差: %.6fs, 电机加速时间: %.6fs, 调整后时间差: %.6fs", 
+			   (now - takeoff_land.toggle_takeoff_land_time).seconds(), AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME, delta_t);
 	
 	// takeoff_land.last_set_cmd_time = now;
 	// takeoff_land.start_pose(2) += speed * delta_t;
@@ -845,6 +838,12 @@ Desired_State_t PX4CtrlFSM::get_takeoff_land_des(const double speed)
 	des.j = Eigen::Vector3d::Zero();
 	des.yaw = takeoff_land.start_pose(3);
 	des.yaw_rate = 0.0;
+	
+	// 详细记录速度值调试信息
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 速度值调试 - 输入速度: %.6fm/s, 时间差: %.6fs, 高度增量: %.6fm", 
+			   speed, delta_t, speed * delta_t);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 速度值调试 - 速度向量: [%.6f, %.6f, %.6f], 加速度向量: [%.6f, %.6f, %.6f]", 
+			   des.v(0), des.v(1), des.v(2), des.a(0), des.a(1), des.a(2));
 
 	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [起飞爬升] 期望状态 - 起始位置: [%.3f, %.3f, %.3f], 高度增量: %.3fm", 
 			   takeoff_land.start_pose(0), takeoff_land.start_pose(1), takeoff_land.start_pose(2), speed * delta_t);
@@ -1058,7 +1057,29 @@ void PX4CtrlFSM::publish_bodyrate_ctrl(const Controller_Output_t &u, const rclcp
 	// 设置推力
 	msg.thrust_body[0] = 0.0;
 	msg.thrust_body[1] = 0.0;
-	msg.thrust_body[2] = u.thrust;
+	
+	// ✅ 推力归一化：确保推力值在[-1, 1]范围内，符合PX4要求
+	double normalized_thrust = -u.thrust; // 坐标系转换：Z轴取反
+	double original_thrust = normalized_thrust;
+	bool thrust_limited = false;
+	
+	if (normalized_thrust > 1.0) {
+		FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [机体角速度控制推力归一化] 推力值超出上限 - 原始值: %.6f, 限制为: 1.000", normalized_thrust);
+		normalized_thrust = 1.0;
+		thrust_limited = true;
+	} else if (normalized_thrust < -1.0) {
+		FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [机体角速度控制推力归一化] 推力值超出下限 - 原始值: %.6f, 限制为: -1.000", normalized_thrust);
+		normalized_thrust = -1.0;
+		thrust_limited = true;
+	}
+	
+	// 记录推力归一化结果
+	if (thrust_limited) {
+		FLIGHT_LOG_INFO(CONTROLLER, "🔧 [机体角速度控制推力归一化] 推力值已修正 - 原始值: %.6f → 修正值: %.6f, 变化量: %.6f", 
+		               original_thrust, normalized_thrust, normalized_thrust - original_thrust);
+	}
+	
+	msg.thrust_body[2] = normalized_thrust;
 
 	ctrl_FCU_pub->publish(msg);
 	
@@ -1091,7 +1112,29 @@ void PX4CtrlFSM::publish_attitude_ctrl(const Controller_Output_t &u, const rclcp
 	// 设置推力
 	msg.thrust_body[0] = 0.0;
 	msg.thrust_body[1] = 0.0;
-	msg.thrust_body[2] = u.thrust;
+	
+	// ✅ 推力归一化：确保推力值在[-1, 1]范围内，符合PX4要求
+	double normalized_thrust = -u.thrust; // 坐标系转换：Z轴取反
+	double original_thrust = normalized_thrust;
+	bool thrust_limited = false;
+	
+	if (normalized_thrust > 1.0) {
+		FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [姿态控制推力归一化] 推力值超出上限 - 原始值: %.6f, 限制为: 1.000", normalized_thrust);
+		normalized_thrust = 1.0;
+		thrust_limited = true;
+	} else if (normalized_thrust < -1.0) {
+		FLIGHT_LOG_WARN(CONTROLLER, "⚠️ [姿态控制推力归一化] 推力值超出下限 - 原始值: %.6f, 限制为: -1.000", normalized_thrust);
+		normalized_thrust = -1.0;
+		thrust_limited = true;
+	}
+	
+	// 记录推力归一化结果
+	if (thrust_limited) {
+		FLIGHT_LOG_INFO(CONTROLLER, "🔧 [姿态控制推力归一化] 推力值已修正 - 原始值: %.6f → 修正值: %.6f, 变化量: %.6f", 
+		               original_thrust, normalized_thrust, normalized_thrust - original_thrust);
+	}
+	
+	msg.thrust_body[2] = normalized_thrust;
 
 	// 详细日志 - 记录姿态控制数据
 	FLIGHT_LOG_INFO(CONTROLLER, "🎯 [AttitudeControl] 姿态控制命令 - 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: %.3f", 
