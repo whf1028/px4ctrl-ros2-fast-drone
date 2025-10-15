@@ -83,9 +83,15 @@ LinearControl::calculateControl(const Desired_State_t &des,
     }
 
     // 计算期望推力
+    FLIGHT_LOG_INFO(CONTROLLER, "⚡ [推力计算] 开始计算期望推力");
+    FLIGHT_LOG_INFO(CONTROLLER, "⚡ [推力计算] 输入加速度 - X: %.6f, Y: %.6f, Z: %.6f", 
+                des_acc(0), des_acc(1), des_acc(2));
+    FLIGHT_LOG_INFO(CONTROLLER, "⚡ [推力计算] 推力映射系数: %.6f", thr2acc_);
+    
     u.thrust = computeDesiredCollectiveThrustSignal(des_acc);//用到z加速度
     
     // 详细日志记录推力计算
+    FLIGHT_LOG_INFO(CONTROLLER, "⚡ [推力计算] 计算结果 - 期望推力: %.6f", u.thrust);
     if (control_log_counter % 20 == 0) {
         FLIGHT_LOG_DEBUG(CONTROLLER, "推力计算 - 期望推力: %.3f, 推力映射系数: %.3f", 
                      u.thrust, thr2acc_);

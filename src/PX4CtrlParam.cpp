@@ -16,6 +16,7 @@ Parameter_t::Parameter_t()
     fcu_timeout.arm_disarm_operation = 3.0;     // 解锁/上锁操作超时时间(秒)
     fcu_timeout.reboot_operation = 10.0;       // 重启操作超时时间(秒)
     fcu_timeout.offboard_prep_time = 2.0;      // Offboard模式准备时间(秒)
+    fcu_timeout.actuator_outputs_timeout = 1.0;  // 电机输出数据超时时间(秒)
     
     // 设置飞控操作检查间隔参数的默认值
     fcu_intervals.offboard_check_ms = 50;      // Offboard模式检查间隔(毫秒)
@@ -90,6 +91,7 @@ void Parameter_t::config_from_ros_handle(const std::shared_ptr<rclcpp::Node>& no
     read_essential_param(node, "fcu_timeout.arm_disarm_operation", fcu_timeout.arm_disarm_operation); // 解锁/上锁操作超时时间
     read_essential_param(node, "fcu_timeout.reboot_operation", fcu_timeout.reboot_operation); // 重启操作超时时间
     read_essential_param(node, "fcu_timeout.offboard_prep_time", fcu_timeout.offboard_prep_time); // Offboard模式准备时间
+    read_essential_param(node, "fcu_timeout.actuator_outputs_timeout", fcu_timeout.actuator_outputs_timeout); // 电机输出数据超时时间
 
     // 飞控操作检查间隔参数
     read_essential_param(node, "fcu_intervals.offboard_check_ms", fcu_intervals.offboard_check_ms); // Offboard模式检查间隔

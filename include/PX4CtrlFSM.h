@@ -8,6 +8,7 @@
 #include <px4_msgs/msg/vehicle_command.hpp>
 #include <px4_msgs/msg/offboard_control_mode.hpp>
 #include <px4_msgs/msg/trajectory_setpoint.hpp>
+#include <px4_msgs/msg/actuator_outputs.hpp>
 
 #include "input.h"
 #include "controller.h"
@@ -57,11 +58,18 @@ public:
 	// Offboard模式相关发布者
 	rclcpp::Publisher<px4_msgs::msg::OffboardControlMode>::SharedPtr offboard_control_mode_pub;  // Offboard控制模式发布者
 	rclcpp::Publisher<px4_msgs::msg::TrajectorySetpoint>::SharedPtr trajectory_setpoint_pub;  // 轨迹设定点发布者
+	
+	// 电机输出订阅器
+	rclcpp::Subscription<px4_msgs::msg::ActuatorOutputs>::SharedPtr actuator_outputs_sub;  // 电机输出订阅器
 
 	quadrotor_msgs::msg::Px4ctrlDebug debug_msg;  // 调试消息
 
 	Eigen::Vector4d hover_pose;  // 悬停位姿
 	rclcpp::Time last_set_hover_pose_time;  // 最后一次设置悬停位姿的时间
+	
+	// 电机输出数据
+	px4_msgs::msg::ActuatorOutputs::SharedPtr actuator_outputs_data;  // 电机输出数据
+	rclcpp::Time last_actuator_outputs_time;  // 最后一次接收电机输出数据的时间
 
 	 
 	// 状态机状态枚举
@@ -83,11 +91,15 @@ public:
 	bool odom_is_received(const rclcpp::Time &now_time);
 	bool imu_is_received(const rclcpp::Time &now_time);
 	bool bat_is_received(const rclcpp::Time &now_time);
+	bool actuator_outputs_is_received(const rclcpp::Time &now_time);
 	bool recv_new_odom();
 
 	// 获取状态相关函数
 	State_t get_state() { return state; }
 	bool get_landed() { return takeoff_land.landed; }
+	
+	// 电机输出回调函数
+	void actuator_outputs_callback(const px4_msgs::msg::ActuatorOutputs::SharedPtr msg);  // 电机输出回调函数
 
 private:
 	State_t state;  // 当前状态

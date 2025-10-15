@@ -42,6 +42,7 @@ public:
 		double arm_disarm_operation;  // 解锁/上锁操作超时时间(秒)
 		double reboot_operation;      // 重启操作超时时间(秒)
 		double offboard_prep_time;    // Offboard模式准备时间(秒)
+		double actuator_outputs_timeout;  // 电机输出数据超时时间(秒)
 	};
 
 	// 飞控操作检查间隔参数结构体

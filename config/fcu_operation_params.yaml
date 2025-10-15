@@ -7,6 +7,7 @@ fcu_timeout:
   arm_disarm_operation: 3.0     # 解锁/上锁操作超时时间(秒)
   reboot_operation: 10.0       # 重启操作超时时间(秒)
   offboard_prep_time: 2.0      # Offboard模式准备时间(秒)
+  actuator_outputs_timeout: 1.0  # 电机输出数据超时时间(秒)
 
 # 飞控操作检查间隔参数
 fcu_intervals:

@@ -253,6 +253,13 @@ int main(int argc, char **argv)
             "/takeoff_land", rclcpp::QoS(5).reliable().durability_volatile(),
             std::bind(&Takeoff_Land_Data_t::feed, &fsm.takeoff_land_data, std::placeholders::_1));
         FLIGHT_LOG_DEBUG(PX4CTRL, "订阅起飞降落命令完成");
+        
+        // 9. 订阅电机输出数据
+        FLIGHT_LOG_INFO(SENSOR, "创建电机输出订阅器: /fmu/out/actuator_outputs");
+        fsm.actuator_outputs_sub = node->create_subscription<px4_msgs::msg::ActuatorOutputs>(
+            "/fmu/out/actuator_outputs", rclcpp::QoS(10).best_effort().durability_volatile(),
+            std::bind(&PX4CtrlFSM::actuator_outputs_callback, &fsm, std::placeholders::_1));
+        FLIGHT_LOG_DEBUG(SENSOR, "电机输出订阅器创建完成，QoS: best_effort");
     #endif // TEST_OPEN
 
     // 创建 best effort QoS profile

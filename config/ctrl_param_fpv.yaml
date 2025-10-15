@@ -17,8 +17,8 @@
     rc_reverse:      # 遥控器通道反向设置
         roll: false      # 横滚通道反向
         pitch: false     # 俯仰通道反向
-        yaw: true        # 偏航通道反向
-        throttle: true   # 油门通道反向
+        yaw: false        # 偏航通道反向
+        throttle: false   # 油门通道反向
 
     # 自动起降配置
     auto_takeoff_land:
@@ -31,7 +31,7 @@
     # 推力模型参数
     # 推力信号u(0~1)到实际推力F(N)的映射模型: F=K1*Voltage^K2*(K3*u^2+(1-K3)*u)
     thrust_model:
-        print_value: false            # 是否在推力模型估计时显示"thr_scale_compensate"或"hover_percentage"的值
+        print_value: true            # 是否在推力模型估计时显示"thr_scale_compensate"或"hover_percentage"的值
         accurate_thrust_model: false  # 是否启用精确推力模型(如不需要精确控制可始终启用)
         # 精确推力映射参数
         K1: 0.7583                   # 需要精确校准!推力系数K1

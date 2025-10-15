@@ -72,11 +72,12 @@ void PX4CtrlFSM::process()
     bool imu_ok = imu_is_received(now_time);
     bool cmd_ok = cmd_is_received(now_time);
     bool bat_ok = bat_is_received(now_time);
+    bool actuator_ok = actuator_outputs_is_received(now_time);
     
-    FLIGHT_LOG_INFO(SENSOR, "传感器数据状态 - RC: %s, Odom: %s, IMU: %s, Cmd: %s, Bat: %s", 
+    FLIGHT_LOG_INFO(SENSOR, "传感器数据状态 - RC: %s, Odom: %s, IMU: %s, Cmd: %s, Bat: %s, Motor: %s", 
                     rc_ok ? "OK" : "TIMEOUT", odom_ok ? "OK" : "TIMEOUT", 
                     imu_ok ? "OK" : "TIMEOUT", cmd_ok ? "OK" : "TIMEOUT", 
-                    bat_ok ? "OK" : "TIMEOUT");
+                    bat_ok ? "OK" : "TIMEOUT", actuator_ok ? "OK" : "TIMEOUT");
     
     if (!rc_ok || !odom_ok || !imu_ok)
     {
@@ -170,6 +171,17 @@ void PX4CtrlFSM::process()
 	{
 		FLIGHT_LOG_INFO(FLIGHT_PHASE, "处理MANUAL_CTRL状态");
 		
+		// 详细rc_data调试日志
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [MANUAL_CTRL] rc_data调试 - enter_hover_mode: %s", rc_data.enter_hover_mode ? "true" : "false");
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [MANUAL_CTRL] rc_data调试 - is_hover_mode: %s, is_command_mode: %s", 
+				   rc_data.is_hover_mode ? "true" : "false", rc_data.is_command_mode ? "true" : "false");
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [MANUAL_CTRL] rc_data调试 - check_centered(): %s", rc_data.check_centered() ? "true" : "false");
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [MANUAL_CTRL] takeoff_land调试 - enable: %s, triggered: %s, cmd: %d", 
+				   param.takeoff_land.enable ? "true" : "false", 
+				   takeoff_land_data.triggered ? "true" : "false", 
+				   takeoff_land_data.takeoff_land_cmd);
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [MANUAL_CTRL] 速度检查 - 当前速度: %.3fm/s, 限制: 0.1m/s", odom_data.v.norm());
+		
 		if (rc_data.enter_hover_mode) // 尝试跳转到AUTO_HOVER
 		{
 			FLIGHT_LOG_INFO(FLIGHT_PHASE, "检测到进入悬停模式指令，准备切换到AUTO_HOVER状态");
@@ -254,7 +266,8 @@ void PX4CtrlFSM::process()
 				FLIGHT_LOG_ERROR(FLIGHT_PHASE, "起飞条件检查失败 - 检测到位置指令");
 				break;
 			}
-			if (odom_data.v.norm() > 0.1)   // 拒绝AUTO_TAKEOFF,因为里程计数据表明无人机速度大于0.1m/s,这是不允许的!
+			// if (odom_data.v.norm() > 0.1)   // 拒绝AUTO_TAKEOFF,因为里程计数据表明无人机速度大于0.1m/s,这是不允许的!
+			if (odom_data.v.norm() > 0.2)  //实际使用中日志显示：[2025-10-15 10:05:30.193] [ERROR] [flight_phases] ❌ [状态机] 拒绝起飞 - 无人机速度过快: 0.140m/s (要求<0.1m/s) // [2025-10-15 10:05:53.104] [ERROR] [flight_phases] ❌ [状态机] 拒绝起飞 - 无人机速度过快: 0.114m/s (要求<0.1m/s)
 			{
 				takeoff_land_data.triggered = false;
 				FLIGHT_LOG_ERROR(FLIGHT_PHASE, "❌ [状态机] 拒绝起飞 - 无人机速度过快: %.3fm/s (要求<0.1m/s)", odom_data.v.norm());
@@ -332,7 +345,18 @@ void PX4CtrlFSM::process()
 					FLIGHT_LOG_WARN(FLIGHT_PHASE, "自动解锁功能未启用，需要手动解锁");
 				}
 				
+				// 详细时间调试日志
+				FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞命令] 时间调试 - now_time: %.6f", now_time.seconds());
+				FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞命令] 时间调试 - 设置前toggle_takeoff_land_time: %.6f", 
+						   takeoff_land.toggle_takeoff_land_time.seconds());
+				
 				takeoff_land.toggle_takeoff_land_time = now_time;
+				
+				FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞命令] 时间调试 - 设置后toggle_takeoff_land_time: %.6f", 
+						   takeoff_land.toggle_takeoff_land_time.seconds());
+				FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞命令] 时间调试 - 时间差: %.6fs", 
+						   (now_time - takeoff_land.toggle_takeoff_land_time).seconds());
+				
 				set_offboard_flag = false;
 				takeoff_land_data.triggered = false;
 				
@@ -478,13 +502,43 @@ void PX4CtrlFSM::process()
 
 	case AUTO_TAKEOFF:
 	{
+		// 详细记录AUTO_TAKEOFF状态处理开始
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🚀 [AUTO_TAKEOFF] 开始处理AUTO_TAKEOFF状态");
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [AUTO_TAKEOFF] 起飞参数 - 目标高度: %.2fm, 起飞速度: %.2fm/s", 
+				   param.takeoff_land.height, param.takeoff_land.speed);
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [AUTO_TAKEOFF] 当前状态 - 高度: %.3fm, 起始高度: %.3fm", 
+				   odom_data.p(2), takeoff_land.start_pose(2));
+		
+		double elapsed_time = (now_time - takeoff_land.toggle_takeoff_land_time).seconds();
+		
+		// 详细时间调试日志
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [AUTO_TAKEOFF] 时间调试 - now_time: %.6f, toggle_takeoff_land_time: %.6f", 
+				   now_time.seconds(), takeoff_land.toggle_takeoff_land_time.seconds());
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [AUTO_TAKEOFF] 时间调试 - 计算elapsed_time: %.6f - %.6f = %.6fs", 
+				   now_time.seconds(), takeoff_land.toggle_takeoff_land_time.seconds(), elapsed_time);
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [AUTO_TAKEOFF] 时间调试 - 是否在加速阶段: %s (%.6f < %.6f)", 
+				   (elapsed_time < AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME) ? "是" : "否", 
+				   elapsed_time, AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+		
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [AUTO_TAKEOFF] 时间信息 - 已用时间: %.3fs, 电机加速时间: %.3fs", 
+				   elapsed_time, AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+		
 		//等待起飞
-		if ((now_time - takeoff_land.toggle_takeoff_land_time).seconds() < AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME) // Wait for several seconds to warn prople.
+		if (elapsed_time < AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME) // Wait for several seconds to warn prople.
 		{ 
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔧 [AUTO_TAKEOFF] 电机加速阶段 - 调用get_rotor_speed_up_des");
 			des = get_rotor_speed_up_des(now_time);
+			
+			// 详细记录电机加速阶段的期望状态
+			FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "⚡ [AUTO_TAKEOFF] 电机加速期望状态 - 位置: [%.3f, %.3f, %.3f], 加速度: [%.3f, %.3f, %.3f]", 
+					   des.p(0), des.p(1), des.p(2), des.a(0), des.a(1), des.a(2));
 		}
 		else if (odom_data.p(2) >= (takeoff_land.start_pose(2) + param.takeoff_land.height)) // reach the desired height（起飞高度）
 		{
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [AUTO_TAKEOFF] 到达目标高度 - 转换到AUTO_HOVER状态");
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [AUTO_TAKEOFF] 高度检查 - 当前高度: %.3fm, 目标高度: %.3fm", 
+					   odom_data.p(2), takeoff_land.start_pose(2) + param.takeoff_land.height);
+			
 			state = AUTO_HOVER;
 			set_hov_with_odom();
 			FLIGHT_LOG_INFO(FLIGHT_PHASE, "\033[32m[px4ctrl] AUTO_TAKEOFF --> AUTO_HOVER(L2)\033[0m");
@@ -494,9 +548,19 @@ void PX4CtrlFSM::process()
 		}
 		else
 		{
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔄 [AUTO_TAKEOFF] 起飞爬升阶段 - 调用get_takeoff_land_des");
+			FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [AUTO_TAKEOFF] 爬升状态 - 当前高度: %.3fm, 目标高度: %.3fm, 剩余高度: %.3fm", 
+					   odom_data.p(2), takeoff_land.start_pose(2) + param.takeoff_land.height,
+					   (takeoff_land.start_pose(2) + param.takeoff_land.height) - odom_data.p(2));
+			
 			des = get_takeoff_land_des(param.takeoff_land.speed);
+			
+			// 详细记录起飞爬升阶段的期望状态
+			FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "⚡ [AUTO_TAKEOFF] 起飞爬升期望状态 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f]", 
+					   des.p(0), des.p(1), des.p(2), des.v(0), des.v(1), des.v(2));
 		}
 
+		FLIGHT_LOG_INFO(FLIGHT_PHASE, "🏁 [AUTO_TAKEOFF] AUTO_TAKEOFF状态处理完成");
 		break;
 	}
 
@@ -694,12 +758,41 @@ Desired_State_t PX4CtrlFSM::get_cmd_des()
 
 Desired_State_t PX4CtrlFSM::get_rotor_speed_up_des(const rclcpp::Time now)
 {
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔧 [电机加速] 开始计算电机加速期望状态");
+	
 	double delta_t = (now - takeoff_land.toggle_takeoff_land_time).seconds();
-	double des_a_z = exp((delta_t - AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME) * 6.0) * 7.0 - 7.0; // Parameters 6.0 and 7.0 are just heuristic values which result in a saticfactory curve.
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [电机加速] 时间计算 - 当前时间: %.3f, 起始时间: %.3f, 时间差: %.3fs", 
+			   now.seconds(), takeoff_land.toggle_takeoff_land_time.seconds(), delta_t);
+	
+	// 详细时间调试日志
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 详细时间调试 - 当前时间: %.6f, 起飞时间: %.6f", 
+			   now.seconds(), takeoff_land.toggle_takeoff_land_time.seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 详细时间调试 - 时间差: %.6fs, 电机加速时间: %.6fs", 
+			   delta_t, AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 详细时间调试 - 计算参数: delta_t - MOTORS_SPEEDUP_TIME = %.6f - %.6f = %.6f", 
+			   delta_t, AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME, delta_t - AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+	
+	// 详细数学计算调试
+	double calc_param = delta_t - AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME;
+	double exp_input = calc_param * 6.0;
+	double exp_result = exp(exp_input);
+	double intermediate = exp_result * 7.0;
+	double des_a_z = intermediate - 7.0;
+	
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 数学计算调试 - 计算参数: %.6f", calc_param);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 数学计算调试 - 指数输入: %.6f", exp_input);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 数学计算调试 - 指数结果: %.6f", exp_result);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 数学计算调试 - 中间结果: %.6f", intermediate);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [电机加速] 数学计算调试 - 最终加速度: %.6f", des_a_z);
+	
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⚡ [电机加速] 加速度计算 - 原始加速度: %.6f, 电机加速时间: %.3fs", 
+			   des_a_z, AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+	
 	if (des_a_z > 0.1)
 	{
 		FLIGHT_LOG_ERROR(FLIGHT_PHASE,"des_a_z > 0.1!, des_a_z=%f", des_a_z);
 		des_a_z = 0.0;
+		FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [电机加速] 加速度过大，已重置为0");
 	}
 
 	Desired_State_t des;
@@ -710,15 +803,39 @@ Desired_State_t PX4CtrlFSM::get_rotor_speed_up_des(const rclcpp::Time now)
 	des.yaw = takeoff_land.start_pose(3);
 	des.yaw_rate = 0.0;
 
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [电机加速] 期望状态 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f], 加速度: [%.3f, %.3f, %.6f]", 
+			   des.p(0), des.p(1), des.p(2), des.v(0), des.v(1), des.v(2), des.a(0), des.a(1), des.a(2));
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [电机加速] 期望状态 - 偏航: %.3f, 偏航角速度: %.3f", des.yaw, des.yaw_rate);
+
 	return des;
 }
 
 Desired_State_t PX4CtrlFSM::get_takeoff_land_des(const double speed)
 {
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔄 [起飞爬升] 开始计算起飞爬升期望状态");
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [起飞爬升] 输入参数 - 速度: %.3fm/s", speed);
+	
 	rclcpp::Time now = node_->now();
+	
+	// 详细时间调试日志
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 当前时间: %.6f", now.seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - toggle_takeoff_land_time: %.6f", 
+			   takeoff_land.toggle_takeoff_land_time.seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 原始时间差: %.6fs", 
+			   (now - takeoff_land.toggle_takeoff_land_time).seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 电机加速时间: %.6fs", 
+			   AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME);
+	
 	double delta_t = (now - takeoff_land.toggle_takeoff_land_time).seconds() - (speed > 0 ? AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME : 0); // speed > 0 means takeoff
+	
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [起飞爬升] 时间调试 - 调整后时间差: %.6fs", delta_t);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [起飞爬升] 时间计算 - 当前时间: %.3f, 起始时间: %.3f, 原始时间差: %.3fs", 
+			   now.seconds(), takeoff_land.toggle_takeoff_land_time.seconds(), 
+			   (now - takeoff_land.toggle_takeoff_land_time).seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [起飞爬升] 时间计算 - 电机加速时间: %.3fs, 调整后时间差: %.3fs", 
+			   AutoTakeoffLand_t::MOTORS_SPEEDUP_TIME, delta_t);
+	
 	// takeoff_land.last_set_cmd_time = now;
-
 	// takeoff_land.start_pose(2) += speed * delta_t;
 
 	Desired_State_t des;
@@ -728,6 +845,13 @@ Desired_State_t PX4CtrlFSM::get_takeoff_land_des(const double speed)
 	des.j = Eigen::Vector3d::Zero();
 	des.yaw = takeoff_land.start_pose(3);
 	des.yaw_rate = 0.0;
+
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [起飞爬升] 期望状态 - 起始位置: [%.3f, %.3f, %.3f], 高度增量: %.3fm", 
+			   takeoff_land.start_pose(0), takeoff_land.start_pose(1), takeoff_land.start_pose(2), speed * delta_t);
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [起飞爬升] 期望状态 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f]", 
+			   des.p(0), des.p(1), des.p(2), des.v(0), des.v(1), des.v(2));
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [起飞爬升] 期望状态 - 加速度: [%.3f, %.3f, %.3f], 偏航: %.3f", 
+			   des.a(0), des.a(1), des.a(2), des.yaw);
 
 	return des;
 }
@@ -792,7 +916,16 @@ void PX4CtrlFSM::set_start_pose_for_takeoff_land(const Odom_Data_t & /* odom */)
 	takeoff_land.start_pose.head<3>() = odom_data.p;
 	takeoff_land.start_pose(3) = get_yaw_from_quaternion(odom_data.q);
 
-	takeoff_land.toggle_takeoff_land_time = node_->now();
+	// 详细时间调试日志
+	rclcpp::Time current_time = node_->now();
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [set_start_pose] 时间调试 - 当前时间: %.6f", current_time.seconds());
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [set_start_pose] 时间调试 - 设置前toggle_takeoff_land_time: %.6f", 
+			   takeoff_land.toggle_takeoff_land_time.seconds());
+	
+	takeoff_land.toggle_takeoff_land_time = current_time;
+	
+	FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔍 [set_start_pose] 时间调试 - 设置后toggle_takeoff_land_time: %.6f", 
+			   takeoff_land.toggle_takeoff_land_time.seconds());
 	
 	// 详细日志记录起飞降落起始位置设置
 	FLIGHT_LOG_INFO(FLIGHT_PHASE, "设置起飞降落起始位置 - 位置: [%.3f, %.3f, %.3f], 偏航: %.3f", 
@@ -941,6 +1074,9 @@ void PX4CtrlFSM::publish_bodyrate_ctrl(const Controller_Output_t &u, const rclcp
 
 void PX4CtrlFSM::publish_attitude_ctrl(const Controller_Output_t &u, const rclcpp::Time &stamp)
 {
+	// 开头日志 - 记录函数调用
+	FLIGHT_LOG_INFO(CONTROLLER, "🎮 [AttitudeControl] 开始发布姿态控制命令");
+	
 	px4_msgs::msg::VehicleAttitudeSetpoint msg;
 
 	// 使用PX4消息格式
@@ -957,16 +1093,24 @@ void PX4CtrlFSM::publish_attitude_ctrl(const Controller_Output_t &u, const rclcp
 	msg.thrust_body[1] = 0.0;
 	msg.thrust_body[2] = u.thrust;
 
+	// 详细日志 - 记录姿态控制数据
+	FLIGHT_LOG_INFO(CONTROLLER, "🎯 [AttitudeControl] 姿态控制命令 - 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: %.3f", 
+	                 u.q.w(), u.q.x(), u.q.y(), u.q.z(), u.thrust);
+	
+	FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "姿态控制命令详情 - 时间戳: %lu, 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: [%.3f, %.3f, %.3f]", 
+	             msg.timestamp, msg.q_d[0], msg.q_d[1], msg.q_d[2], msg.q_d[3], 
+	             msg.thrust_body[0], msg.thrust_body[1], msg.thrust_body[2]);
+
 	ctrl_FCU_pub->publish(msg);
 	
-	// 详细日志记录姿态控制命令发布
+	// 发布后确认日志
+	FLIGHT_LOG_INFO(CONTROLLER, "✅ [AttitudeControl] 姿态控制命令已发布");
+	
+	// 保留原有的周期性详细日志记录
 	static int attitude_log_counter = 0;
 	if (++attitude_log_counter % 50 == 0) { // 每50次记录一次
-		FLIGHT_LOG_INFO(CONTROLLER, "发布姿态控制命令 - 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: %.3f", 
-		                 u.q.w(), u.q.x(), u.q.y(), u.q.z(), u.thrust);
-		FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "姿态控制命令 - 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: [%.3f, %.3f, %.3f], 时间戳: %lu", 
-		             msg.q_d[0], msg.q_d[1], msg.q_d[2], msg.q_d[3], 
-		             msg.thrust_body[0], msg.thrust_body[1], msg.thrust_body[2], msg.timestamp);
+		FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "周期性姿态控制日志 - 四元数: [%.3f, %.3f, %.3f, %.3f], 推力: %.3f, 时间戳: %lu", 
+		             u.q.w(), u.q.x(), u.q.y(), u.q.z(), u.thrust, msg.timestamp);
 	}
 }
 
@@ -1081,19 +1225,51 @@ void PX4CtrlFSM::publish_trigger(const nav_msgs::msg::Odometry &odom_msg)
 
 bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
 {
+    FLIGHT_LOG_INFO(FLIGHT_PHASE, "🔄 [Offboard模式切换] 开始切换Offboard模式 - 目标: %s", on_off ? "进入" : "退出");
+    FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [Offboard模式切换] 当前导航状态: %d", state_data.current_state.nav_state);
+    
     if (on_off)
     {
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "🚀 [Offboard模式切换] 开始进入Offboard模式流程");
+        
         // 1. 前置条件：持续发送控制消息(使用配置的准备时间)
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏱️ [Offboard模式切换] 开始准备阶段 - 准备时间: %.3fs, 间隔: %dms", 
+                    param.fcu_timeout.offboard_prep_time, param.fcu_intervals.offboard_prep_ms);
+        
         auto start_time = node_->now();
+        int prep_cycle_count = 0;
         while ((node_->now() - start_time).seconds() < param.fcu_timeout.offboard_prep_time)
         {
+            prep_cycle_count++;
+            FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "🔄 [Offboard模式切换] 准备阶段循环 #%d - 已用时间: %.3fs", 
+                        prep_cycle_count, (node_->now() - start_time).seconds());
+            
             publish_offboard_control_mode();  // 发送OffboardControlMode
-            publish_trajectory_setpoint();    // 发送TrajectorySetpoint
+			// 根据控制模式发送相应的控制消息
+			rclcpp::Time current_time = node_->now();
+			Controller_Output_t u;
+			Desired_State_t des(odom_data);
+			
+			// 计算控制输出
+			debug_msg = controller.calculateControl(des, odom_data, imu_data, u);
+			
+			if (param.use_bodyrate_ctrl) {
+				// 角速度控制模式
+				FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "📡 [Offboard模式切换] 发送角速度控制命令");
+				publish_bodyrate_ctrl(u, current_time);
+			} else {
+				// 姿态控制模式
+				FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "📡 [Offboard模式切换] 发送姿态控制命令");
+				publish_attitude_ctrl(u, current_time);  // ✅ 发送VehicleAttitudeSetpoint
+			}
             rclcpp::sleep_for(std::chrono::milliseconds(param.fcu_intervals.offboard_prep_ms));
             rclcpp::spin_some(node_);
         }
         
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard模式切换] 准备阶段完成 - 总循环次数: %d", prep_cycle_count);
+        
         // 2. 发送VehicleCommand
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "📡 [Offboard模式切换] 发送VehicleCommand进入Offboard模式");
         px4_msgs::msg::VehicleCommand cmd;
         cmd.timestamp = node_->get_clock()->now().nanoseconds() / 1000;
         cmd.param1 = 1.0f;  // MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
@@ -1106,18 +1282,48 @@ bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
         cmd.confirmation = 0;
         cmd.from_external = true;
         
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "📋 [Offboard模式切换] VehicleCommand参数 - param1: %.1f, param2: %.1f, command: %d", 
+                    cmd.param1, cmd.param2, cmd.command);
+        
         vehicle_command_pub->publish(cmd);
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard模式切换] VehicleCommand已发布");
         
         // 3. 等待模式切换，同时继续发送控制消息
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏳ [Offboard模式切换] 开始等待模式切换 - 超时时间: %.3fs, 检查间隔: %dms", 
+                    param.fcu_timeout.offboard_mode_switch, param.fcu_intervals.offboard_check_ms);
+        
         start_time = node_->now();
+        int wait_cycle_count = 0;
         while ((node_->now() - start_time).seconds() < param.fcu_timeout.offboard_mode_switch)
         {
-            publish_offboard_control_mode();
-            publish_trajectory_setpoint();
+            wait_cycle_count++;
+            double elapsed_time = (node_->now() - start_time).seconds();
             
+            FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "🔄 [Offboard模式切换] 等待循环 #%d - 已用时间: %.3fs, 当前状态: %d", 
+                        wait_cycle_count, elapsed_time, state_data.current_state.nav_state);
+            
+            publish_offboard_control_mode();
+            
+			// 根据控制模式发送相应的控制消息
+			rclcpp::Time current_time = node_->now();
+			Controller_Output_t u;
+			Desired_State_t des(odom_data);
+			
+			// 计算控制输出
+			debug_msg = controller.calculateControl(des, odom_data, imu_data, u);
+			
+			if (param.use_bodyrate_ctrl) {
+				FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "📡 [Offboard模式切换] 等待期间发送角速度控制命令");
+				publish_bodyrate_ctrl(u, current_time);
+			} else {
+				FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "📡 [Offboard模式切换] 等待期间发送姿态控制命令");
+				publish_attitude_ctrl(u, current_time);  // ✅ 发送VehicleAttitudeSetpoint
+			}
+
             if (state_data.current_state.nav_state == px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_OFFBOARD)
             {
-                FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard] 成功进入OFFBOARD模式");
+                FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard模式切换] 成功进入OFFBOARD模式 - 总等待时间: %.3fs, 循环次数: %d", 
+                            elapsed_time, wait_cycle_count);
                 return true;
             }
             
@@ -1125,30 +1331,38 @@ bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
             rclcpp::spin_some(node_);
         }
         
-        FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [Offboard] 模式切换超时!");
+        FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [Offboard模式切换] 模式切换超时! - 总等待时间: %.3fs, 循环次数: %d, 当前状态: %d", 
+                    param.fcu_timeout.offboard_mode_switch, wait_cycle_count, state_data.current_state.nav_state);
         return false;
     }
     else
     {
         // ========== 退出OFFBOARD模式 - 简化版本 ==========
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "🚪 [Offboard模式切换] 开始退出Offboard模式流程");
         
         // 1. 发送VehicleCommand退出OFFBOARD模式
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "📡 [Offboard模式切换] 发送VehicleCommand退出Offboard模式");
         px4_msgs::msg::VehicleCommand cmd;
         cmd.timestamp = node_->get_clock()->now().nanoseconds() / 1000;
         
         // 根据之前保存的状态设置目标模式
         uint8_t target_nav_state = state_data.state_before_offboard.nav_state;
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "📊 [Offboard模式切换] 目标导航状态: %d", target_nav_state);
         
         // 简化的模式参数设置
         if (target_nav_state == px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_MANUAL)
         {
             cmd.param1 = 0.0f;  // 不使用自定义模式
             cmd.param2 = 0.0f;
+            FLIGHT_LOG_INFO(FLIGHT_PHASE, "📋 [Offboard模式切换] 目标模式: 手动模式 - param1: %.1f, param2: %.1f", 
+                        cmd.param1, cmd.param2);
         }
         else
         {
             cmd.param1 = 1.0f;  // 使用自定义模式
             cmd.param2 = 0.0f;  // 让PX4自动选择合适的主模式
+            FLIGHT_LOG_INFO(FLIGHT_PHASE, "📋 [Offboard模式切换] 目标模式: 自动模式 - param1: %.1f, param2: %.1f", 
+                        cmd.param1, cmd.param2);
         }
         
         cmd.command = 176;  // MAV_CMD_DO_SET_MODE
@@ -1159,17 +1373,31 @@ bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
         cmd.confirmation = 0;
         cmd.from_external = true;
         
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "📋 [Offboard模式切换] VehicleCommand参数 - param1: %.1f, param2: %.1f, command: %d", 
+                    cmd.param1, cmd.param2, cmd.command);
+        
         vehicle_command_pub->publish(cmd);
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard模式切换] 退出VehicleCommand已发布");
         
         // 2. 等待模式切换（简化等待逻辑）
+        FLIGHT_LOG_INFO(FLIGHT_PHASE, "⏳ [Offboard模式切换] 开始等待退出模式切换 - 超时时间: %.3fs, 检查间隔: %dms", 
+                    param.fcu_timeout.offboard_mode_switch, param.fcu_intervals.offboard_check_ms);
+        
         auto start_time = node_->now();
+        int exit_wait_cycle_count = 0;
         while ((node_->now() - start_time).seconds() < param.fcu_timeout.offboard_mode_switch)
         {
+            exit_wait_cycle_count++;
+            double elapsed_time = (node_->now() - start_time).seconds();
+            
+            FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "🔄 [Offboard模式切换] 退出等待循环 #%d - 已用时间: %.3fs, 当前状态: %d", 
+                        exit_wait_cycle_count, elapsed_time, state_data.current_state.nav_state);
+            
             // 只要不在OFFBOARD模式就算成功
             if (state_data.current_state.nav_state != px4_msgs::msg::VehicleStatus::NAVIGATION_STATE_OFFBOARD)
             {
-                FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard] 成功退出OFFBOARD模式，当前状态: %d", 
-                    state_data.current_state.nav_state);
+                FLIGHT_LOG_INFO(FLIGHT_PHASE, "✅ [Offboard模式切换] 成功退出OFFBOARD模式 - 总等待时间: %.3fs, 循环次数: %d, 当前状态: %d", 
+                            elapsed_time, exit_wait_cycle_count, state_data.current_state.nav_state);
                 return true;
             }
             
@@ -1178,8 +1406,8 @@ bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
         }
         
         // 3. 超时处理
-        FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [Offboard] 退出模式切换超时! 当前导航状态: %d", 
-            state_data.current_state.nav_state);
+        FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [Offboard模式切换] 退出模式切换超时! - 总等待时间: %.3fs, 循环次数: %d, 当前状态: %d", 
+                    param.fcu_timeout.offboard_mode_switch, exit_wait_cycle_count, state_data.current_state.nav_state);
         return false;
     }
 }
@@ -1187,6 +1415,9 @@ bool PX4CtrlFSM::toggle_offboard_mode(bool on_off)
 // 需要添加的辅助函数
 void PX4CtrlFSM::publish_offboard_control_mode()
 {
+    // 开头日志 - 记录函数调用
+    FLIGHT_LOG_INFO(CONTROLLER, "🚀 [OffboardControlMode] 开始发布Offboard控制模式命令");
+    
     px4_msgs::msg::OffboardControlMode msg;
     msg.timestamp = node_->get_clock()->now().nanoseconds() / 1000;
     msg.position = false;       // ❌ 禁用位置控制
@@ -1195,11 +1426,33 @@ void PX4CtrlFSM::publish_offboard_control_mode()
     msg.attitude = true;  // ✅ 启用姿态控制
     msg.body_rate = false;
     
+    // 详细日志 - 记录控制模式配置
+    FLIGHT_LOG_INFO(CONTROLLER, "📋 [OffboardControlMode] 控制模式配置 - 位置: %s, 速度: %s, 加速度: %s, 姿态: %s, 角速度: %s", 
+                    msg.position ? "启用" : "禁用",
+                    msg.velocity ? "启用" : "禁用", 
+                    msg.acceleration ? "启用" : "禁用",
+                    msg.attitude ? "启用" : "禁用",
+                    msg.body_rate ? "启用" : "禁用");
+    
+    FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "Offboard控制模式详情 - 时间戳: %lu, 位置控制: %s, 速度控制: %s, 加速度控制: %s, 姿态控制: %s, 角速度控制: %s",
+                     msg.timestamp,
+                     msg.position ? "true" : "false",
+                     msg.velocity ? "true" : "false", 
+                     msg.acceleration ? "true" : "false",
+                     msg.attitude ? "true" : "false",
+                     msg.body_rate ? "true" : "false");
+    
     offboard_control_mode_pub->publish(msg);
+    
+    // 发布后确认日志
+    FLIGHT_LOG_INFO(CONTROLLER, "✅ [OffboardControlMode] Offboard控制模式命令已发布");
 }
 
 void PX4CtrlFSM::publish_trajectory_setpoint()
 {
+    // 开头日志 - 记录函数调用
+    FLIGHT_LOG_INFO(CONTROLLER, "🎯 [TrajectorySetpoint] 开始发布轨迹设定点命令");
+    
     px4_msgs::msg::TrajectorySetpoint msg;
     msg.timestamp = node_->get_clock()->now().nanoseconds() / 1000;
     
@@ -1214,7 +1467,18 @@ void PX4CtrlFSM::publish_trajectory_setpoint()
     msg.velocity[1] = std::numeric_limits<float>::quiet_NaN();
     msg.velocity[2] = std::numeric_limits<float>::quiet_NaN();
     
+    // 详细日志 - 记录轨迹设定点数据
+    FLIGHT_LOG_INFO(CONTROLLER, "📍 [TrajectorySetpoint] 轨迹设定点 - 位置: [%.3f, %.3f, %.3f], 偏航角: %.3f", 
+                    msg.position[0], msg.position[1], msg.position[2], msg.yaw);
+    
+    FLIGHT_LOG_DEBUG(FLIGHT_PHASE, "轨迹设定点详情 - 时间戳: %lu, 位置: [%.3f, %.3f, %.3f], 偏航角: %.3f, 速度: [%.3f, %.3f, %.3f]",
+                     msg.timestamp, msg.position[0], msg.position[1], msg.position[2], msg.yaw,
+                     msg.velocity[0], msg.velocity[1], msg.velocity[2]);
+    
     trajectory_setpoint_pub->publish(msg);
+    
+    // 发布后确认日志
+    FLIGHT_LOG_INFO(CONTROLLER, "✅ [TrajectorySetpoint] 轨迹设定点命令已发布");
 }
 
 // 解锁和上锁
@@ -1336,5 +1600,49 @@ bool PX4CtrlFSM::reboot_FCU()
         FLIGHT_LOG_WARN(FLIGHT_PHASE, "⚠️ [Reboot] 重启命令可能未生效，USB连接未断开");
         return false;
     }
+}
+
+// 电机输出回调函数
+void PX4CtrlFSM::actuator_outputs_callback(const px4_msgs::msg::ActuatorOutputs::SharedPtr msg)
+{
+    actuator_outputs_data = msg;
+    last_actuator_outputs_time = node_->now();
+    
+    // 详细日志记录电机输出状态
+    static int motor_log_counter = 0;
+    if (++motor_log_counter % 100 == 0) { // 每100次记录一次，避免日志过多
+        FLIGHT_LOG_INFO(SENSOR, "电机输出数据 - 时间戳: %lu, 有效输出数: %u", 
+                        msg->timestamp, msg->noutputs);
+        
+        // 记录前4个电机的输出值（通常四旋翼有4个电机）
+        FLIGHT_LOG_DEBUG(SENSOR, "电机输出值 - M1: %.3f, M2: %.3f, M3: %.3f, M4: %.3f", 
+                        msg->output[0], msg->output[1], msg->output[2], msg->output[3]);
+        
+        // 检查电机是否在工作
+        bool motors_working = false;
+        for (unsigned int i = 0; i < 4 && i < msg->noutputs; i++) {
+            if (msg->output[i] > 0.1f) { // 假设输出大于0.1表示电机在工作
+                motors_working = true;
+                break;
+            }
+        }
+        
+        if (motors_working) {
+            FLIGHT_LOG_INFO(SENSOR, "✅ 电机状态: 正在工作");
+        } else {
+            FLIGHT_LOG_WARN(SENSOR, "⚠️ 电机状态: 未工作或输出过低");
+        }
+    }
+}
+
+// 检查电机输出数据是否接收
+bool PX4CtrlFSM::actuator_outputs_is_received(const rclcpp::Time &now_time)
+{
+    if (!actuator_outputs_data) {
+        return false;
+    }
+    
+    double time_diff = (now_time - last_actuator_outputs_time).seconds();
+    return time_diff < param.fcu_timeout.actuator_outputs_timeout;
 }
 

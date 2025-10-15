@@ -308,8 +308,75 @@ void State_Data_t::feed(const px4_msgs::msg::VehicleStatus::SharedPtr pMsg)
     // 使用静态计数器，避免频繁打印日志
     static int log_counter = 0;
     if (++log_counter % 50 == 0) {  // 每50次打印一次
-        LISTENER_LOG_INFO("飞控状态更新 - 导航状态: %d, 解锁状态: %d", 
-                         pMsg->nav_state, pMsg->arming_state);
+        // 导航状态字符串转换
+        const char* nav_state_str = "UNKNOWN";
+        switch(pMsg->nav_state) {
+            case 0: nav_state_str = "MANUAL"; break;
+            case 1: nav_state_str = "ALTCTL"; break;
+            case 2: nav_state_str = "POSCTL"; break;
+            case 3: nav_state_str = "AUTO_MISSION"; break;
+            case 4: nav_state_str = "AUTO_LOITER"; break;
+            case 5: nav_state_str = "AUTO_RTL"; break;
+            case 6: nav_state_str = "POSITION_SLOW"; break;
+            case 10: nav_state_str = "ACRO"; break;
+            case 12: nav_state_str = "DESCEND"; break;
+            case 13: nav_state_str = "TERMINATION"; break;
+            case 14: nav_state_str = "OFFBOARD"; break;
+            case 15: nav_state_str = "STAB"; break;
+            case 16: nav_state_str = "RATTITUDE_LEGACY"; break;
+            case 17: nav_state_str = "TAKEOFF"; break;
+            case 18: nav_state_str = "LAND"; break;
+            case 19: nav_state_str = "FOLLOW_TARGET"; break;
+            case 20: nav_state_str = "PRECISION_LAND"; break;
+            case 21: nav_state_str = "ORBIT"; break;
+        }
+        
+        // 解锁状态字符串转换
+        const char* arming_state_str = "UNKNOWN";
+        switch(pMsg->arming_state) {
+            case 1: arming_state_str = "DISARMED"; break;
+            case 2: arming_state_str = "ARMED"; break;
+        }
+        
+        // 载具类型字符串转换
+        const char* vehicle_type_str = "UNKNOWN";
+        switch(pMsg->vehicle_type) {
+            case 1: vehicle_type_str = "ROTARY_WING"; break;
+            case 2: vehicle_type_str = "FIXED_WING"; break;
+            case 3: vehicle_type_str = "ROVER"; break;
+        }
+        
+        FLIGHT_LOG_INFO(TOPIC, "🚁 [飞控状态] 导航模式: %s(%d), 解锁状态: %s(%d), 载具类型: %s(%d)", 
+                         nav_state_str, pMsg->nav_state, 
+                         arming_state_str, pMsg->arming_state,
+                         vehicle_type_str, pMsg->vehicle_type);
+        
+        FLIGHT_LOG_INFO(TOPIC, "⏰ [时间戳] 武装时间: %lu, 起飞时间: %lu, 导航状态时间: %lu", 
+                         pMsg->armed_time, pMsg->takeoff_time, pMsg->nav_state_timestamp);
+        
+        FLIGHT_LOG_INFO(TOPIC, "🔧 [系统状态] 故障保护: %s, 用户接管: %s, 故障保护延迟: %d", 
+                         pMsg->failsafe ? "是" : "否",
+                         pMsg->failsafe_and_user_took_over ? "是" : "否",
+                         pMsg->failsafe_defer_state);
+        
+        FLIGHT_LOG_INFO(TOPIC, "📡 [通信状态] GCS连接丢失: %s, 高延迟链路丢失: %s, 连接丢失计数: %d", 
+                         pMsg->gcs_connection_lost ? "是" : "否",
+                         pMsg->high_latency_data_link_lost ? "是" : "否",
+                         pMsg->gcs_connection_lost_counter);
+        
+        FLIGHT_LOG_INFO(TOPIC, "🛡️ [安全状态] 安全按钮可用: %s, 安全关闭: %s, 电源输入有效: %s, USB连接: %s", 
+                         pMsg->safety_button_available ? "是" : "否",
+                         pMsg->safety_off ? "是" : "否",
+                         pMsg->power_input_valid ? "是" : "否",
+                         pMsg->usb_connected ? "是" : "否");
+        
+        FLIGHT_LOG_INFO(TOPIC, "🔋 [系统检查] 预飞行检查: %s, 校准进行中: %s, 校准启用: %s", 
+                         pMsg->pre_flight_checks_pass ? "通过" : "失败",
+                         pMsg->rc_calibration_in_progress ? "是" : "否",
+                         pMsg->calibration_enabled ? "是" : "否");
+        
+        FLIGHT_LOG_INFO(TOPIC, "🆔 [系统ID] 系统类型: %d, 系统ID: %d, 组件ID: %d", 
+                         pMsg->system_type, pMsg->system_id, pMsg->component_id);
     }
 }
 
@@ -327,7 +394,7 @@ void ExtendedState_Data_t::feed(const px4_msgs::msg::VehicleLandDetected::Shared
     // 扩展状态信息频率较低，每20次记录一次
     static int log_counter = 0;
     if (++log_counter % 20 == 0) {
-        LISTENER_LOG_INFO("扩展状态更新 - 着陆检测: %s, 着陆状态: %s", 
+        FLIGHT_LOG_INFO(TOPIC, "扩展状态更新 - 着陆检测: %s, 着陆状态: %s", 
                          pMsg->landed ? "已着陆" : "未着陆",
                          pMsg->in_ground_effect ? "地面效应中" : "正常飞行");
     }
@@ -345,34 +412,73 @@ void Command_Data_t::feed(const quadrotor_msgs::msg::PositionCommand::SharedPtr 
     msg = *pMsg;
     rcv_stamp = node_->now();
 
-    p(0) = msg.position.x;
-    p(1) = msg.position.y;
-    p(2) = msg.position.z;
+    // 详细记录接收到的原始消息数据
+    static int detailed_log_counter = 0;
+    static bool first_cmd_received = false;
+    static int total_cmd_count = 0;
+    
+    total_cmd_count++;
+    
+    // 记录第一次命令接收
+    if (!first_cmd_received) {
+        FLIGHT_LOG_INFO(SENSOR, "🎯 [位置指令] 首次接收到位置命令！");
+        FLIGHT_LOG_INFO(SENSOR, "📡 [位置指令] 消息头时间戳: %d.%09d", 
+                       msg.header.stamp.sec, msg.header.stamp.nanosec);
+        FLIGHT_LOG_INFO(SENSOR, "🔧 [位置指令] 回调函数正常工作，订阅器连接成功！");
+        first_cmd_received = true;
+    }
 
-    v(0) = msg.velocity.x;
-    v(1) = msg.velocity.y;
-    v(2) = msg.velocity.z;
+    // 每50次接收记录一次详细统计信息
+    if (total_cmd_count % 50 == 0) {
+        FLIGHT_LOG_INFO(SENSOR, "📊 [位置指令] 接收统计 - 总接收次数: %d", total_cmd_count);
+    }
 
-    a(0) = msg.acceleration.x;
-    a(1) = msg.acceleration.y;
-    a(2) = msg.acceleration.z;
+    // 处理位置信息 - msg.position是geometry_msgs::Point类型
+    p(0) = msg.position.x;    // geometry_msgs::Point.x
+    p(1) = msg.position.y;    // geometry_msgs::Point.y
+    p(2) = msg.position.z;   // geometry_msgs::Point.z
 
-    // PositionCommand消息中没有jerk字段，设置为0
-    j(0) = 0.0;
-    j(1) = 0.0;
-    j(2) = 0.0;
+    // 处理速度信息 - msg.velocity是geometry_msgs::Vector3类型
+    v(0) = msg.velocity.x;     // geometry_msgs::Vector3.x
+    v(1) = msg.velocity.y;    // geometry_msgs::Vector3.y
+    v(2) = msg.velocity.z;    // geometry_msgs::Vector3.z
 
-    // std::cout << "j1=" << j.transpose() << std::endl;
+    // 处理加速度信息 - msg.acceleration是geometry_msgs::Vector3类型
+    a(0) = msg.acceleration.x;  // geometry_msgs::Vector3.x
+    a(1) = msg.acceleration.y;  // geometry_msgs::Vector3.y
+    a(2) = msg.acceleration.z;  // geometry_msgs::Vector3.z
 
+    // 控制精度高
+    j(0) = msg.jerk.x;
+    j(1) = msg.jerk.y;
+    j(2) = msg.jerk.z;
+
+    // 处理偏航信息
     yaw = uav_utils::normalize_angle(msg.yaw);
     yaw_rate = msg.yaw_dot;
     
-    // 使用静态计数器，避免频繁打印日志
-    // cmd主题频率较高，每100次记录一次
-    static int log_counter = 0;
-    if (++log_counter % 100 == 0) {
-        LISTENER_LOG_INFO("位置指令更新 - 位置: [%.3f, %.3f, %.3f], 速度: [%.3f, %.3f, %.3f], 偏航: %.3f", 
-                         p(0), p(1), p(2), v(0), v(1), v(2), yaw);
+    // 详细记录未处理的字段信息
+    if (detailed_log_counter <= 2 || ++detailed_log_counter % 100 == 0) { // 前3此记录和每100次记录一次详细信息
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 位置: [%.3f, %.3f, %.3f]", p(0), p(1), p(2));
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 速度: [%.3f, %.3f, %.3f]", v(0), v(1), v(2));
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 加速度: [%.3f, %.3f, %.3f]", a(0), a(1), a(2));
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] Jerk: [%.3f, %.3f, %.3f] (硬编码为0)", j(0), j(1), j(2));
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 偏航: %.3f, 偏航率: %.3f", yaw, yaw_rate);
+        
+        // 记录未处理的增益字段
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 位置增益kx: [%.3f, %.3f, %.3f] (未使用)", 
+                       msg.kx[0], msg.kx[1], msg.kx[2]);
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 速度增益kv: [%.3f, %.3f, %.3f] (未使用)", 
+                       msg.kv[0], msg.kv[1], msg.kv[2]);
+        FLIGHT_LOG_INFO(SENSOR, "📋 [位置指令] 轨迹ID: %u, 轨迹标志: %d (未使用)", 
+                       msg.trajectory_id, msg.trajectory_flag);
+        
+        // 检查消息时间戳
+        double msg_time = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9;
+        double current_time = rcv_stamp.seconds();
+        double time_diff = current_time - msg_time;
+        FLIGHT_LOG_INFO(SENSOR, "⏱️ [位置指令] 时间信息 - 消息时间: %.3f, 接收时间: %.3f, 延迟: %.3fs", 
+                       msg_time, current_time, time_diff);
     }
 }
 
